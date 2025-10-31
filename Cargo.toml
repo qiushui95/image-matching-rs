@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-image = { version = "0.25", features = ["png"] }
-rand = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-rustfft = "6.2.0"
-rayon = "1.10.0"
+image = { version = "0.25.8", features = ["png"] }
+rand = "0.8.5"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+rustfft = "6.4.1"
+rayon = "1.11.0"
 num-complex = "0.4.6"
