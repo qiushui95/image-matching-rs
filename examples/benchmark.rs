@@ -81,6 +81,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("阈值{:.2}: {:.2}ms, {}个匹配", threshold, elapsed.as_millis(), matches.len());
     }
     
+    // 分段模式性能测试
+    println!("\n=== 分段模式性能测试 ===");
+    
+    // 准备分段模式模板
+    let start = Instant::now();
+    matcher.prepare_template(
+        &template_image,
+        screen_image.width(),
+        screen_image.height(),
+        MatcherMode::Segmented
+    )?;
+    let segmented_prepare_time = start.elapsed();
+    println!("分段模式模板准备时间: {:.2}ms", segmented_prepare_time.as_millis());
+    
+    // 分段模式预热
+    let screen_luma = screen_image.to_luma8();
+    let _ = matcher.match_by_segmented(&screen_luma, 0.8)?;
+    println!("分段模式预热完成");
+    
+    // 分段模式性能测试
+    let mut segmented_total_time = 0u128;
+    let mut segmented_total_matches = 0;
+    
+    for i in 1..=test_rounds {
+        let start = Instant::now();
+        let matches = matcher.match_by_segmented(&screen_luma, 0.8)?;
+        let elapsed = start.elapsed();
+        
+        segmented_total_time += elapsed.as_millis();
+        segmented_total_matches += matches.len();
+        
+        println!("分段模式第{}轮: {:.2}ms, 找到{}个匹配", i, elapsed.as_millis(), matches.len());
+    }
+    
+    // 分段模式统计
+    let segmented_avg_time = segmented_total_time as f64 / test_rounds as f64;
+    let segmented_avg_matches = segmented_total_matches as f64 / test_rounds as f64;
+    let segmented_throughput = 1000.0 / segmented_avg_time;
+    let segmented_pixels_per_second = (screen_image.width() * screen_image.height()) as f64 * segmented_throughput;
+    
+    println!("\n=== 分段模式性能统计 ===");
+    println!("平均匹配时间: {:.2}ms", segmented_avg_time);
+    println!("平均匹配数量: {:.1}", segmented_avg_matches);
+    println!("处理吞吐量: {:.2} 匹配/秒", segmented_throughput);
+    println!("像素处理速度: {:.2} M像素/秒", segmented_pixels_per_second / 1_000_000.0);
+    
+    // 模式对比
+    println!("\n=== 模式性能对比 ===");
+    println!("FFT模式:");
+    println!("  模板准备: {:.2}ms", prepare_time.as_millis());
+    println!("  平均匹配: {:.2}ms", avg_time);
+    println!("  吞吐量: {:.2} 匹配/秒", throughput);
+    
+    println!("分段模式:");
+    println!("  模板准备: {:.2}ms", segmented_prepare_time.as_millis());
+    println!("  平均匹配: {:.2}ms", segmented_avg_time);
+    println!("  吞吐量: {:.2} 匹配/秒", segmented_throughput);
+    
+    let speedup = avg_time / segmented_avg_time;
+    if speedup > 1.0 {
+        println!("分段模式比FFT模式快 {:.2}x", speedup);
+    } else {
+        println!("FFT模式比分段模式快 {:.2}x", 1.0 / speedup);
+    }
+    
+    // 分段模式不同阈值测试
+    println!("\n=== 分段模式不同阈值性能测试 ===");
+    let segmented_thresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
+    
+    for &threshold in &segmented_thresholds {
+        let start = Instant::now();
+        let matches = matcher.match_by_segmented(&screen_luma, threshold)?;
+        let elapsed = start.elapsed();
+        
+        println!("阈值{:.1}: {:.2}ms, {}个匹配", threshold, elapsed.as_millis(), matches.len());
+    }
+    
     println!("\n=== 基准测试完成 ===");
     
     Ok(())

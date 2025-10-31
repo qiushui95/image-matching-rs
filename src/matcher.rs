@@ -57,6 +57,8 @@ struct FFTTemplateData {
 pub struct ImageMatcher {
     /// FFT模板数据
     fft_template_data: Option<FFTTemplateData>,
+    /// 分段模板数据
+    segmented_template_data: Option<SegmentedTemplateData>,
     /// 原始模板图像（用于分段匹配）
     template_image: Option<ImageBuffer<Luma<u8>, Vec<u8>>>,
     /// 模板尺寸
@@ -68,6 +70,7 @@ impl ImageMatcher {
     pub fn new() -> Self {
         Self {
             fft_template_data: None,
+            segmented_template_data: None,
             template_image: None,
             template_size: None,
         }
@@ -121,12 +124,9 @@ impl ImageMatcher {
                 Ok(())
             }
             MatcherMode::Segmented => {
-                // TODO: 实现分段模式的模板预处理
-                // 分段模式不需要预处理FFT数据，只需要保存原始模板
-                // 未来可以在这里添加分段匹配的优化预处理，如：
-                // - 计算模板的统计信息
-                // - 预计算积分图像
-                // - 设置分段参数
+                // 准备分段模板数据
+                let segmented_data = self.prepare_segmented_template(template)?;
+                self.segmented_template_data = Some(segmented_data);
                 Ok(())
             }
         }
@@ -174,26 +174,52 @@ impl ImageMatcher {
     }
 
     /// 使用分段模式进行匹配
-    fn match_by_segmented(&self, _image: &ImageBuffer<Luma<u8>, Vec<u8>>, _threshold: f32) -> Result<Vec<MatcherResult>, String> {
-        // TODO: 实现分段匹配算法
-        // 分段匹配的实现思路：
-        // 1. 将大图像分割成多个重叠的小块
-        // 2. 对每个小块执行传统的模板匹配
-        // 3. 合并结果并去除重复匹配
-        // 4. 处理边界情况
-        //
-        // 优势：
-        // - 内存使用量更小
-        // - 可以处理任意大小的图像
-        // - 适合在资源受限的环境中使用
-        //
-        // 实现步骤：
-        // 1. 确定分段大小和重叠区域
-        // 2. 实现传统的归一化互相关算法
-        // 3. 实现结果合并和去重逻辑
-        // 4. 优化边界处理
+    pub fn match_by_segmented(&self, image: &ImageBuffer<Luma<u8>, Vec<u8>>, threshold: f32) -> Result<Vec<MatcherResult>, String> {
+        // 获取预处理的分段模板数据
+        let template_data = self.segmented_template_data.as_ref()
+            .ok_or("分段模板数据未设置，请先调用 prepare_template")?;
         
-        Err("分段匹配模式尚未实现，请使用FFT模式".to_string())
+        let (template_width, template_height) = (template_data.template_width, template_data.template_height);
+        let (image_width, image_height) = image.dimensions();
+        
+        if template_width > image_width || template_height > image_height {
+            return Ok(Vec::new());
+        }
+        
+        // 预处理：创建积分图像
+        let (image_integral, squared_image_integral) = self.compute_integral_images(image);
+        
+        // 执行分段匹配
+        let mut results = Vec::new();
+        
+        for y in 0..=(image_height - template_height) {
+            for x in 0..=(image_width - template_width) {
+                let correlation = self.calculate_segmented_correlation(
+                    &image_integral,
+                    &squared_image_integral,
+                    template_data,
+                    x,
+                    y,
+                    template_width,
+                    template_height,
+                );
+                
+                if correlation >= threshold {
+                    results.push(MatcherResult {
+                        x,
+                        y,
+                        width: template_width,
+                        height: template_height,
+                        correlation,
+                    });
+                }
+            }
+        }
+        
+        // 按相关性降序排序
+        results.sort_by(|a, b| b.correlation.partial_cmp(&a.correlation).unwrap_or(std::cmp::Ordering::Equal));
+        
+        Ok(results)
     }
 
     /// 获取模板尺寸
@@ -286,11 +312,8 @@ impl ImageMatcher {
             return Ok(Vec::new());
         }
         
-        // 转换图像为二维向量
-        let image_vec = self.imagebuffer_to_vec(image);
-        
         // 计算积分图像
-        let (image_integral, squared_image_integral) = self.compute_integral_images(&image_vec);
+        let (image_integral, squared_image_integral) = self.compute_integral_images(image);
         
         // 计算图像平均值
         let sum_image: u64 = self.sum_region(&image_integral, 0, 0, image_width, image_height);
@@ -419,24 +442,229 @@ impl ImageMatcher {
     }
 
     /// 计算积分图像
-    fn compute_integral_images(&self, image: &[Vec<u8>]) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
-        let height = image.len();
-        let width = image[0].len();
+    fn compute_integral_images(&self, image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> (Vec<Vec<u64>>, Vec<Vec<u64>>) {
+        let (width, height) = image.dimensions();
+        let mut integral = vec![vec![0u64; width as usize + 1]; height as usize + 1];
+        let mut squared_integral = vec![vec![0u64; width as usize + 1]; height as usize + 1];
         
-        let mut integral = vec![vec![0u64; width + 1]; height + 1];
-        let mut squared_integral = vec![vec![0u64; width + 1]; height + 1];
-        
-        for y in 1..=height {
-            for x in 1..=width {
-                let pixel = image[y - 1][x - 1] as u64;
-                let pixel_squared = pixel * pixel;
+        for y in 0..height {
+            for x in 0..width {
+                let pixel_value = image.get_pixel(x, y)[0] as u64;
+                let squared_value = pixel_value * pixel_value;
                 
-                integral[y][x] = pixel + integral[y - 1][x] + integral[y][x - 1] - integral[y - 1][x - 1];
-                squared_integral[y][x] = pixel_squared + squared_integral[y - 1][x] + squared_integral[y][x - 1] - squared_integral[y - 1][x - 1];
+                integral[y as usize + 1][x as usize + 1] = 
+                    pixel_value +
+                    integral[y as usize][x as usize + 1] +
+                    integral[y as usize + 1][x as usize] -
+                    integral[y as usize][x as usize];
+                
+                squared_integral[y as usize + 1][x as usize + 1] = 
+                    squared_value +
+                    squared_integral[y as usize][x as usize + 1] +
+                    squared_integral[y as usize + 1][x as usize] -
+                    squared_integral[y as usize][x as usize];
             }
         }
         
         (integral, squared_integral)
+    }
+
+    /// 准备分段模板数据
+    fn prepare_segmented_template(&self, template: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Result<SegmentedTemplateData, String> {
+        let (template_width, template_height) = template.dimensions();
+        
+        // 计算模板的基本统计信息
+        let template_sum: u64 = (0..template_height)
+            .flat_map(|y| (0..template_width).map(move |x| template.get_pixel(x, y)[0] as u64))
+            .sum();
+        let template_mean = template_sum as f32 / (template_width * template_height) as f32;
+        
+        // 根据模板大小选择合适的分段策略
+        let (fast_grid_x, fast_grid_y, slow_grid_x, slow_grid_y) = if template_width < 20 || template_height < 20 {
+            // 小模板使用较少的分段
+            (2, 2, 4, 4)
+        } else if template_width < 50 || template_height < 50 {
+            // 中等模板使用中等分段
+            (4, 4, 8, 8)
+        } else {
+            // 大模板使用更多分段
+            (8, 8, 16, 16)
+        };
+        
+        // 创建快速分段
+        let fast_segments = self.create_segments(template, fast_grid_x, fast_grid_y, template_mean);
+        let fast_sum_squared_deviations = self.calculate_segments_variance(&fast_segments, template_mean);
+        
+        // 创建慢速分段
+        let slow_segments = self.create_segments(template, slow_grid_x, slow_grid_y, template_mean);
+        let slow_sum_squared_deviations = self.calculate_segments_variance(&slow_segments, template_mean);
+        
+        Ok(SegmentedTemplateData {
+            fast_segments,
+            slow_segments,
+            template_width,
+            template_height,
+            fast_sum_squared_deviations,
+            slow_sum_squared_deviations,
+            fast_mean: template_mean,
+            slow_mean: template_mean,
+            expected_corr_fast: 0.1,  // 降低快速检查阈值
+        })
+    }
+    
+    /// 创建图像分段
+    fn create_segments(&self, template: &ImageBuffer<Luma<u8>, Vec<u8>>, grid_x: u32, grid_y: u32, template_mean: f32) -> Vec<Segment> {
+        let (template_width, template_height) = template.dimensions();
+        let mut segments = Vec::new();
+        
+        let segment_width = template_width / grid_x;
+        let segment_height = template_height / grid_y;
+        
+        for grid_row in 0..grid_y {
+            for grid_col in 0..grid_x {
+                let x = grid_col * segment_width;
+                let y = grid_row * segment_height;
+                
+                let actual_width = if grid_col == grid_x - 1 {
+                    template_width - x
+                } else {
+                    segment_width
+                };
+                
+                let actual_height = if grid_row == grid_y - 1 {
+                    template_height - y
+                } else {
+                    segment_height
+                };
+                
+                // 计算段的平均值
+                let mut sum = 0u64;
+                let mut count = 0u32;
+                
+                for seg_y in y..(y + actual_height) {
+                    for seg_x in x..(x + actual_width) {
+                        sum += template.get_pixel(seg_x, seg_y)[0] as u64;
+                        count += 1;
+                    }
+                }
+                
+                let value = if count > 0 { sum as f32 / count as f32 } else { template_mean };
+                
+                segments.push(Segment {
+                    x,
+                    y,
+                    width: actual_width,
+                    height: actual_height,
+                    value,
+                });
+            }
+        }
+        
+        segments
+    }
+    
+    /// 计算分段的方差
+    fn calculate_segments_variance(&self, segments: &[Segment], mean: f32) -> f32 {
+        segments.iter()
+            .map(|segment| {
+                let diff = segment.value - mean;
+                diff * diff * (segment.width * segment.height) as f32
+            })
+            .sum()
+    }
+    
+    /// 计算分段相关性
+    fn calculate_segmented_correlation(
+         &self,
+         image_integral: &[Vec<u64>],
+         squared_image_integral: &[Vec<u64>],
+         template_data: &SegmentedTemplateData,
+         x: u32,
+         y: u32,
+         _template_width: u32,
+         _template_height: u32,
+     ) -> f32 {
+        // 首先进行快速分段检查
+        let fast_correlation = self.calculate_correlation_for_segments(
+            image_integral,
+            squared_image_integral,
+            &template_data.fast_segments,
+            template_data.fast_sum_squared_deviations,
+            template_data.fast_mean,
+            x,
+            y,
+        );
+        
+        // 如果快速检查不通过，直接返回
+        if fast_correlation < template_data.expected_corr_fast {
+            return fast_correlation;
+        }
+        
+        // 进行慢速分段检查
+        self.calculate_correlation_for_segments(
+            image_integral,
+            squared_image_integral,
+            &template_data.slow_segments,
+            template_data.slow_sum_squared_deviations,
+            template_data.slow_mean,
+            x,
+            y,
+        )
+    }
+    
+    /// 为特定分段计算相关性
+    fn calculate_correlation_for_segments(
+        &self,
+        image_integral: &[Vec<u64>],
+        _squared_image_integral: &[Vec<u64>],
+        segments: &[Segment],
+        _template_sum_squared_deviations: f32,
+        template_mean: f32,
+        offset_x: u32,
+        offset_y: u32,
+    ) -> f32 {
+        let mut template_values = Vec::new();
+        let mut image_values = Vec::new();
+        
+        // 收集所有分段的值
+        for segment in segments {
+            let seg_x = offset_x + segment.x;
+            let seg_y = offset_y + segment.y;
+            
+            let image_sum = self.sum_region(image_integral, seg_x, seg_y, segment.width, segment.height) as f32;
+            let segment_pixels = (segment.width * segment.height) as f32;
+            let segment_image_mean = image_sum / segment_pixels;
+            
+            template_values.push(segment.value);
+            image_values.push(segment_image_mean);
+        }
+        
+        // 计算图像值的均值
+        let image_mean = image_values.iter().sum::<f32>() / image_values.len() as f32;
+        
+        // 计算Pearson相关系数
+        let mut numerator = 0.0f32;
+        let mut template_variance = 0.0f32;
+        let mut image_variance = 0.0f32;
+        
+        for i in 0..template_values.len() {
+            let template_dev = template_values[i] - template_mean;
+            let image_dev = image_values[i] - image_mean;
+            
+            numerator += template_dev * image_dev;
+            template_variance += template_dev * template_dev;
+            image_variance += image_dev * image_dev;
+        }
+        
+        let denominator = (template_variance * image_variance).sqrt();
+        
+        if denominator == 0.0 {
+            0.0
+        } else {
+            let correlation = numerator / denominator;
+            // 相关系数应该在[-1, 1]范围内
+            correlation.max(-1.0).min(1.0)
+        }
     }
 
     /// 使用积分图像计算区域和
@@ -448,6 +676,7 @@ impl ImageMatcher {
         
         integral[y2][x2] + integral[y1][x1] - integral[y1][x2] - integral[y2][x1]
     }
+
 }
 
 impl Default for ImageMatcher {
@@ -464,11 +693,18 @@ mod tests {
     #[test]
     fn test_integral_image() {
         let matcher = ImageMatcher::new();
-        let image = vec![
-            vec![1, 2, 3],
-            vec![4, 5, 6],
-            vec![7, 8, 9],
-        ];
+        
+        // 创建一个 3x3 的测试图像
+        let mut image = ImageBuffer::new(3, 3);
+        image.put_pixel(0, 0, Luma([1]));
+        image.put_pixel(1, 0, Luma([2]));
+        image.put_pixel(2, 0, Luma([3]));
+        image.put_pixel(0, 1, Luma([4]));
+        image.put_pixel(1, 1, Luma([5]));
+        image.put_pixel(2, 1, Luma([6]));
+        image.put_pixel(0, 2, Luma([7]));
+        image.put_pixel(1, 2, Luma([8]));
+        image.put_pixel(2, 2, Luma([9]));
         
         let (integral, _) = matcher.compute_integral_images(&image);
         
@@ -512,4 +748,168 @@ mod tests {
         assert_eq!(results[0].y, 0);
         assert!(results[0].correlation > 0.9); // 高相关性
     }
+
+    #[test]
+    fn test_segmented_template_matching() {
+        // 创建测试图像和模板
+        let mut image = ImageBuffer::new(20, 20);
+        let mut template = ImageBuffer::new(5, 5);
+        
+        // 创建一个简单的渐变模式
+        for y in 0..20 {
+            for x in 0..20 {
+                image.put_pixel(x, y, Luma([((x + y) * 6) as u8]));
+            }
+        }
+        
+        // 模板是图像左上角的一部分
+        for y in 0..5 {
+            for x in 0..5 {
+                template.put_pixel(x, y, Luma([((x + y) * 6) as u8]));
+            }
+        }
+        
+        // 执行分段匹配
+        let mut matcher = ImageMatcher::new();
+        matcher.prepare_template(&template, 5, 5, MatcherMode::Segmented).unwrap();
+        let results = matcher.match_by_segmented(&image, 0.1).unwrap();
+        
+        // 应该找到至少一个匹配
+        assert!(!results.is_empty());
+        
+        // 最佳匹配应该在(0,0)位置
+        assert_eq!(results[0].x, 0);
+        assert_eq!(results[0].y, 0);
+        assert!(results[0].correlation > 0.3); // 分段匹配的相关性可能较低
+    }
+
+    #[test]
+    fn test_segmented_template_matching_with_offset() {
+        // 创建测试图像和模板
+        let mut image = ImageBuffer::new(30, 30);
+        let mut template = ImageBuffer::new(8, 8);
+        
+        // 创建一个简单的渐变模式
+        for y in 0..30 {
+            for x in 0..30 {
+                let value = ((x + y) * 4) as u8;
+                image.put_pixel(x, y, Luma([value]));
+            }
+        }
+        
+        // 模板是图像中间的一部分 (从位置 10,10 开始)
+        for y in 0..8 {
+            for x in 0..8 {
+                let img_x = x + 10;
+                let img_y = y + 10;
+                let value = ((img_x + img_y) * 4) as u8;
+                template.put_pixel(x, y, Luma([value]));
+            }
+        }
+        
+        // 执行分段匹配
+        let mut matcher = ImageMatcher::new();
+        matcher.prepare_template(&template, 8, 8, MatcherMode::Segmented).unwrap();
+        let results = matcher.match_by_segmented(&image, 0.1).unwrap();
+        
+        assert!(!results.is_empty(), "应该找到至少一个匹配");
+        
+        // 检查是否在预期位置找到了匹配
+        let found_at_expected = results.iter().any(|r| r.x == 10 && r.y == 10 && r.correlation > 0.1);
+        assert!(found_at_expected, "应该在位置 (10,10) 找到匹配，相关性 > 0.1");
+    }
+
+    #[test]
+    fn test_segmented_template_matching_no_match() {
+        // 创建完全不同的图像和模板
+        let mut image = ImageBuffer::new(15, 15);
+        let mut template = ImageBuffer::new(5, 5);
+        
+        // 图像是纯白色
+        for y in 0..15 {
+            for x in 0..15 {
+                image.put_pixel(x, y, Luma([255]));
+            }
+        }
+        
+        // 模板是纯黑色
+        for y in 0..5 {
+            for x in 0..5 {
+                template.put_pixel(x, y, Luma([0]));
+            }
+        }
+        
+        // 执行分段匹配
+        let mut matcher = ImageMatcher::new();
+        matcher.prepare_template(&template, 5, 5, MatcherMode::Segmented).unwrap();
+        let results = matcher.match_by_segmented(&image, 0.8).unwrap();
+        
+        // 由于阈值较高且图像完全不匹配，应该没有结果
+        assert!(results.is_empty() || results[0].correlation < 0.8);
+    }
+
+    #[test]
+    fn test_segmented_prepare_template() {
+        // 测试分段模板准备功能
+        let mut template = ImageBuffer::new(8, 8);
+        
+        // 创建一个有变化的模板
+        for y in 0..8 {
+            for x in 0..8 {
+                let value = ((x * y) % 256) as u8;
+                template.put_pixel(x, y, Luma([value]));
+            }
+        }
+        
+        let matcher = ImageMatcher::new();
+        let template_data = matcher.prepare_segmented_template(&template).unwrap();
+        
+        // 验证分段数据
+        assert!(!template_data.fast_segments.is_empty());
+        assert!(!template_data.slow_segments.is_empty());
+        assert_eq!(template_data.template_width, 8);
+        assert_eq!(template_data.template_height, 8);
+        assert!(template_data.fast_sum_squared_deviations >= 0.0);
+        assert!(template_data.slow_sum_squared_deviations >= 0.0);
+        
+        // 慢速分段应该比快速分段更多
+        assert!(template_data.slow_segments.len() >= template_data.fast_segments.len());
+    }
+}
+
+/// 分段模板数据
+#[derive(Debug, Clone)]
+struct SegmentedTemplateData {
+    /// 快速分段（粗糙分割，段数少）
+    fast_segments: Vec<Segment>,
+    /// 慢速分段（精细分割，段数多）
+    slow_segments: Vec<Segment>,
+    /// 模板尺寸
+    template_width: u32,
+    template_height: u32,
+    /// 快速分段的平方差之和
+    fast_sum_squared_deviations: f32,
+    /// 慢速分段的平方差之和
+    slow_sum_squared_deviations: f32,
+    /// 快速分段的均值
+    fast_mean: f32,
+    /// 慢速分段的均值
+    slow_mean: f32,
+    /// 期望相关性阈值
+    expected_corr_fast: f32,
+}
+
+/// 图像段
+#[derive(Debug, Clone)]
+struct Segment {
+    /// 段的起始 x 坐标
+    x: u32,
+    /// 段的起始 y 坐标
+    y: u32,
+    /// 段的宽度
+    width: u32,
+    /// 段的高度
+    height: u32,
+    /// 段的平均值
+    value: f32,
 }

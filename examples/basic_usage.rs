@@ -49,15 +49,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                  best_match.x, best_match.y, best_match.correlation);
     }
     
-    // 演示分段模式（目前会返回错误，因为尚未实现）
-    println!("\n=== 尝试分段模式 ===");
-    match matcher.matching(open("images/screen.png")?, MatcherMode::Segmented, 0.8) {
-        Ok(segmented_matches) => {
-            println!("分段模式找到 {} 个匹配", segmented_matches.len());
-        }
-        Err(e) => {
-            println!("分段模式: {}", e);
-        }
+    // 演示分段模式
+    println!("\n=== 分段模式匹配 ===");
+    
+    // 重新加载图像用于分段模式测试
+    let screen_image_for_segmented = open("images/screen.png")?;
+    
+    // 准备分段模式模板
+    println!("准备模板 (分段模式)...");
+    matcher.prepare_template(
+        &template_image,
+        screen_image_for_segmented.width(),
+        screen_image_for_segmented.height(),
+        MatcherMode::Segmented
+    )?;
+    
+    // 执行分段匹配
+    println!("执行分段匹配...");
+    let start_time = std::time::Instant::now();
+    let segmented_matches = matcher.match_by_segmented(&screen_image_for_segmented.to_luma8(), 0.8)?;
+    let elapsed = start_time.elapsed();
+    
+    println!("分段匹配完成，耗时: {:.2}ms", elapsed.as_millis());
+    println!("找到 {} 个匹配:", segmented_matches.len());
+    
+    for (i, result) in segmented_matches.iter().enumerate().take(5) {
+        println!("  {}. 位置({}, {}), 相关系数: {:.3}", 
+                 i + 1, result.x, result.y, result.correlation);
+    }
+    
+    if segmented_matches.len() > 5 {
+        println!("  ... 还有 {} 个匹配", segmented_matches.len() - 5);
+    }
+    
+    // 显示最佳匹配
+    if let Some(best_match) = segmented_matches.first() {
+        println!("分段模式最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
+                 best_match.x, best_match.y, best_match.correlation);
     }
     
     Ok(())
