@@ -6,12 +6,17 @@
 //!
 //! ## 使用方法
 //! 
-//! ```rust
+//! ```rust,no_run
 //! use image_matching_rs::{ImageMatcher, MatcherMode};
+//! use image::{ImageBuffer, Luma, DynamicImage};
+//! 
+//! // 创建模板和图像
+//! let template = ImageBuffer::<Luma<u8>, Vec<u8>>::new(10, 10);
+//! let image = DynamicImage::ImageLuma8(ImageBuffer::<Luma<u8>, Vec<u8>>::new(100, 100));
 //! 
 //! let mut matcher = ImageMatcher::new();
-//! matcher.prepare_template(&template, width, height, MatcherMode::FFT)?;
-//! let results = matcher.matching(image, MatcherMode::FFT, 0.8)?;
+//! matcher.prepare_template(&template, 10, 10, MatcherMode::FFT).unwrap();
+//! let results = matcher.matching(image, MatcherMode::FFT, 0.8).unwrap();
 //! ```
 //! 
 //! ## 模块概览

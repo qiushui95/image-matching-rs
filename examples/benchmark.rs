@@ -3,159 +3,183 @@ use image_matching_rs::{ImageMatcher, MatcherMode};
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== 图像匹配性能基准测试 (使用新的ImageMatcher API) ===");
+    println!("=== 图像匹配性能基准测试 (所有模板和目标图组合，阈值0.98) ===");
     
-    // 加载图像和模板
-    let screen_image = open("images/screen.png")?;
-    let template_image = open("images/template.png")?.to_luma8();
+    // 定义所有模板和目标图组合
+    let template_sizes = vec![50, 100, 150, 200];
+    let screen_sizes = vec![(1024, 768), (1920, 1080), (2560, 1440)];
+    let threshold = 0.98;
     
     println!("测试配置:");
-    println!("  屏幕图像: {}x{}", screen_image.width(), screen_image.height());
-    println!("  模板图像: {}x{}", template_image.width(), template_image.height());
-    println!("  图像像素数: {}", screen_image.width() * screen_image.height());
+    println!("  模板尺寸: {:?}", template_sizes);
+    println!("  屏幕尺寸: {:?}", screen_sizes);
+    println!("  匹配阈值: {}", threshold);
+    println!("  总组合数: {}", template_sizes.len() * screen_sizes.len());
     
-    // 创建匹配器
-    let mut matcher = ImageMatcher::new();
+    let mut total_combinations = 0;
+    let mut successful_combinations = 0;
+    let mut total_fft_time = 0u128;
+    let mut total_segmented_time = 0u128;
+    let mut total_fft_matches = 0;
+    let mut total_segmented_matches = 0;
     
-    // 测试模板准备时间
-    println!("\n=== 模板准备性能 (FFT模式) ===");
-    let start = Instant::now();
-    matcher.prepare_template(
-        &template_image,
-        screen_image.width(),
-        screen_image.height(),
-        MatcherMode::FFT
-    )?;
-    let prepare_time = start.elapsed();
-    println!("模板准备时间: {:.2}ms", prepare_time.as_millis());
-    
-    // 预热运行
-    println!("\n=== 预热运行 ===");
-    let _ = matcher.matching(screen_image.clone(), MatcherMode::FFT, 0.8)?;
-    println!("预热完成");
-    
-    // 性能测试
-    println!("\n=== 匹配性能测试 ===");
-    let test_rounds = 10;
-    let mut total_time = 0u128;
-    let mut total_matches = 0;
-    
-    for i in 1..=test_rounds {
-        let start = Instant::now();
-        let matches = matcher.matching(screen_image.clone(), MatcherMode::FFT, 0.8)?;
-        let elapsed = start.elapsed();
+    // 遍历所有模板和目标图组合
+    for &template_size in &template_sizes {
+        println!("\n=== 测试模板 {}x{} ===", template_size, template_size);
         
-        total_time += elapsed.as_millis();
-        total_matches += matches.len();
+        // 加载模板图
+        let template_path = format!("images/template{}x{}.png", template_size, template_size);
+        let template_image = match open(&template_path) {
+            Ok(img) => img.to_luma8(),
+            Err(e) => {
+                println!("警告: 无法加载模板 {}: {}", template_path, e);
+                continue;
+            }
+        };
         
-        println!("第{}轮: {:.2}ms, 找到{}个匹配", i, elapsed.as_millis(), matches.len());
+        println!("模板图像尺寸: {}x{}", template_image.width(), template_image.height());
+        
+        for &(screen_w, screen_h) in &screen_sizes {
+            println!("\n--- 测试屏幕 {}x{} ---", screen_w, screen_h);
+            total_combinations += 1;
+            
+            // 加载目标图
+            let screen_path = format!("images/screen{}x{}.png", screen_w, screen_h);
+            let screen_image = match open(&screen_path) {
+                Ok(img) => img,
+                Err(e) => {
+                    println!("警告: 无法加载屏幕图像 {}: {}", screen_path, e);
+                    continue;
+                }
+            };
+            
+            let screen_luma = screen_image.to_luma8();
+            println!("屏幕图像尺寸: {}x{}", screen_image.width(), screen_image.height());
+            
+            // 创建匹配器
+            let mut matcher = ImageMatcher::new();
+            
+            // FFT模式测试
+            println!("FFT模式测试:");
+            
+            // 准备FFT模板
+            let start = Instant::now();
+            match matcher.prepare_template(
+                &template_image,
+                screen_image.width(),
+                screen_image.height(),
+                MatcherMode::FFT
+            ) {
+                Ok(_) => {
+                    let prepare_time = start.elapsed();
+                    println!("  模板准备时间: {:.2}ms", prepare_time.as_millis());
+                    
+                    // 执行FFT匹配
+                    let start = Instant::now();
+                    match matcher.matching(screen_image.clone(), MatcherMode::FFT, threshold) {
+                        Ok(matches) => {
+                            let match_time = start.elapsed();
+                            total_fft_time += match_time.as_millis();
+                            total_fft_matches += matches.len();
+                            
+                            println!("  匹配时间: {:.2}ms", match_time.as_millis());
+                            println!("  找到匹配: {} 个", matches.len());
+                            
+                            if !matches.is_empty() {
+                                println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                                    matches[0].x, matches[0].y, matches[0].correlation);
+                            }
+                        }
+                        Err(e) => {
+                            println!("  FFT匹配失败: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("  FFT模板准备失败: {}", e);
+                }
+            }
+            
+            // 分段模式测试
+            println!("分段模式测试:");
+            
+            // 准备分段模板
+            let start = Instant::now();
+            match matcher.prepare_template(
+                &template_image,
+                screen_image.width(),
+                screen_image.height(),
+                MatcherMode::Segmented
+            ) {
+                Ok(_) => {
+                    let prepare_time = start.elapsed();
+                    println!("  模板准备时间: {:.2}ms", prepare_time.as_millis());
+                    
+                    // 执行分段匹配
+                    let start = Instant::now();
+                    match matcher.match_by_segmented(&screen_luma, threshold) {
+                        Ok(matches) => {
+                            let match_time = start.elapsed();
+                            total_segmented_time += match_time.as_millis();
+                            total_segmented_matches += matches.len();
+                            
+                            println!("  匹配时间: {:.2}ms", match_time.as_millis());
+                            println!("  找到匹配: {} 个", matches.len());
+                            
+                            if !matches.is_empty() {
+                                println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                                    matches[0].x, matches[0].y, matches[0].correlation);
+                            }
+                            
+                            successful_combinations += 1;
+                        }
+                        Err(e) => {
+                            println!("  分段匹配失败: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("  分段模板准备失败: {}", e);
+                }
+            }
+        }
     }
     
-    // 计算统计数据
-    let avg_time = total_time as f64 / test_rounds as f64;
-    let avg_matches = total_matches as f64 / test_rounds as f64;
-    let throughput = 1000.0 / avg_time; // 匹配/秒
-    let pixels_per_second = (screen_image.width() * screen_image.height()) as f64 * throughput;
+    // 总体统计
+    println!("\n=== 总体性能统计 ===");
+    println!("总组合数: {}", total_combinations);
+    println!("成功组合数: {}", successful_combinations);
     
-    println!("\n=== 性能统计 ===");
-    println!("测试轮数: {}", test_rounds);
-    println!("平均匹配时间: {:.2}ms", avg_time);
-    println!("平均匹配数量: {:.1}", avg_matches);
-    println!("处理吞吐量: {:.2} 匹配/秒", throughput);
-    println!("像素处理速度: {:.2} M像素/秒", pixels_per_second / 1_000_000.0);
-    
-    // 内存使用估算
-    let fft_size = 4096u32; // 从调试信息得知
-    let memory_mb = (fft_size * fft_size * 8) as f64 / 1024.0 / 1024.0;
-    println!("估算内存使用: {:.1}MB", memory_mb);
-    
-    // 不同阈值的性能测试
-    println!("\n=== 不同阈值性能测试 ===");
-    let thresholds = [0.5, 0.7, 0.8, 0.9, 0.95];
-    
-    for &threshold in &thresholds {
-        let start = Instant::now();
-        let matches = matcher.matching(screen_image.clone(), MatcherMode::FFT, threshold)?;
-        let elapsed = start.elapsed();
+    if successful_combinations > 0 {
+        let avg_fft_time = total_fft_time as f64 / successful_combinations as f64;
+        let avg_segmented_time = total_segmented_time as f64 / successful_combinations as f64;
+        let avg_fft_matches = total_fft_matches as f64 / successful_combinations as f64;
+        let avg_segmented_matches = total_segmented_matches as f64 / successful_combinations as f64;
         
-        println!("阈值{:.2}: {:.2}ms, {}个匹配", threshold, elapsed.as_millis(), matches.len());
-    }
-    
-    // 分段模式性能测试
-    println!("\n=== 分段模式性能测试 ===");
-    
-    // 准备分段模式模板
-    let start = Instant::now();
-    matcher.prepare_template(
-        &template_image,
-        screen_image.width(),
-        screen_image.height(),
-        MatcherMode::Segmented
-    )?;
-    let segmented_prepare_time = start.elapsed();
-    println!("分段模式模板准备时间: {:.2}ms", segmented_prepare_time.as_millis());
-    
-    // 分段模式预热
-    let screen_luma = screen_image.to_luma8();
-    let _ = matcher.match_by_segmented(&screen_luma, 0.8)?;
-    println!("分段模式预热完成");
-    
-    // 分段模式性能测试
-    let mut segmented_total_time = 0u128;
-    let mut segmented_total_matches = 0;
-    
-    for i in 1..=test_rounds {
-        let start = Instant::now();
-        let matches = matcher.match_by_segmented(&screen_luma, 0.8)?;
-        let elapsed = start.elapsed();
+        println!("\nFFT模式平均性能:");
+        println!("  平均匹配时间: {:.2}ms", avg_fft_time);
+        println!("  平均匹配数量: {:.1}", avg_fft_matches);
+        println!("  总匹配时间: {:.2}ms", total_fft_time);
         
-        segmented_total_time += elapsed.as_millis();
-        segmented_total_matches += matches.len();
+        println!("\n分段模式平均性能:");
+        println!("  平均匹配时间: {:.2}ms", avg_segmented_time);
+        println!("  平均匹配数量: {:.1}", avg_segmented_matches);
+        println!("  总匹配时间: {:.2}ms", total_segmented_time);
         
-        println!("分段模式第{}轮: {:.2}ms, 找到{}个匹配", i, elapsed.as_millis(), matches.len());
-    }
-    
-    // 分段模式统计
-    let segmented_avg_time = segmented_total_time as f64 / test_rounds as f64;
-    let segmented_avg_matches = segmented_total_matches as f64 / test_rounds as f64;
-    let segmented_throughput = 1000.0 / segmented_avg_time;
-    let segmented_pixels_per_second = (screen_image.width() * screen_image.height()) as f64 * segmented_throughput;
-    
-    println!("\n=== 分段模式性能统计 ===");
-    println!("平均匹配时间: {:.2}ms", segmented_avg_time);
-    println!("平均匹配数量: {:.1}", segmented_avg_matches);
-    println!("处理吞吐量: {:.2} 匹配/秒", segmented_throughput);
-    println!("像素处理速度: {:.2} M像素/秒", segmented_pixels_per_second / 1_000_000.0);
-    
-    // 模式对比
-    println!("\n=== 模式性能对比 ===");
-    println!("FFT模式:");
-    println!("  模板准备: {:.2}ms", prepare_time.as_millis());
-    println!("  平均匹配: {:.2}ms", avg_time);
-    println!("  吞吐量: {:.2} 匹配/秒", throughput);
-    
-    println!("分段模式:");
-    println!("  模板准备: {:.2}ms", segmented_prepare_time.as_millis());
-    println!("  平均匹配: {:.2}ms", segmented_avg_time);
-    println!("  吞吐量: {:.2} 匹配/秒", segmented_throughput);
-    
-    let speedup = avg_time / segmented_avg_time;
-    if speedup > 1.0 {
-        println!("分段模式比FFT模式快 {:.2}x", speedup);
-    } else {
-        println!("FFT模式比分段模式快 {:.2}x", 1.0 / speedup);
-    }
-    
-    // 分段模式不同阈值测试
-    println!("\n=== 分段模式不同阈值性能测试 ===");
-    let segmented_thresholds = [0.5, 0.6, 0.7, 0.8, 0.9];
-    
-    for &threshold in &segmented_thresholds {
-        let start = Instant::now();
-        let matches = matcher.match_by_segmented(&screen_luma, threshold)?;
-        let elapsed = start.elapsed();
+        // 性能对比
+        if avg_fft_time > 0.0 && avg_segmented_time > 0.0 {
+            let speedup = avg_fft_time / avg_segmented_time;
+            if speedup > 1.0 {
+                println!("\n性能对比: 分段模式比FFT模式快 {:.2}x", speedup);
+            } else {
+                println!("\n性能对比: FFT模式比分段模式快 {:.2}x", 1.0 / speedup);
+            }
+        }
         
-        println!("阈值{:.1}: {:.2}ms, {}个匹配", threshold, elapsed.as_millis(), matches.len());
+        // 匹配效果对比
+        println!("\n匹配效果对比:");
+        println!("  FFT模式总匹配数: {}", total_fft_matches);
+        println!("  分段模式总匹配数: {}", total_segmented_matches);
     }
     
     println!("\n=== 基准测试完成 ===");
