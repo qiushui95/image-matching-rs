@@ -212,7 +212,11 @@ impl ImageMatcher {
             return img;
         };
 
-        let resize_height = (img.height() as f32 * resize_width as f32 / img.width() as f32) as u32;
+        let (width,height) = img.dimensions();
+
+        if width==resize_width { return img; }
+
+        let resize_height = (height as f32 * resize_width as f32 / width as f32) as u32;
         img.resize(resize_width, resize_height, FilterType::Lanczos3)
     }
 
@@ -244,11 +248,11 @@ impl ImageMatcher {
         // 转换模板为二维数组
         let template_vec = Self::image_buffer_to_2d_vec(template);
 
-        // 计算模板统计信息
-        let template_stats = Self::calculate_image_statistics(&template_vec);
+        // 计算模板均值
+        let template_mean = Self::calculate_image_mean(&template_vec);
         
         // 创建零均值模板
-        let zero_mean_template = Self::create_zero_mean_template(&template_vec, template_stats.mean);
+        let zero_mean_template = Self::create_zero_mean_template(&template_vec, template_mean);
 
         // 计算平方偏差和
         let template_sum_squared_deviations = Self::calculate_sum_squared_deviations(&zero_mean_template);
@@ -493,7 +497,7 @@ impl ImageMatcher {
     /// 
     /// # 返回值
     /// 包含均值的统计信息
-    fn calculate_image_statistics(image_vec: &[Vec<u8>]) -> ImageStatistics {
+    fn calculate_image_mean(image_vec: &[Vec<u8>]) -> f32 {
         let height = image_vec.len();
         let width = image_vec[0].len();
         let total_pixels = (height * width) as f32;
@@ -504,12 +508,7 @@ impl ImageMatcher {
             .map(|&val| val as u64)
             .sum();
 
-        let mean = sum as f32 / total_pixels;
-
-        ImageStatistics {
-            mean,
-            avg_deviation: 0.0, // 对于FFT模式，不需要计算平均偏差
-        }
+        sum as f32 / total_pixels
     }
 
     /// 计算模板统计信息（包括平均偏差）
@@ -994,7 +993,6 @@ impl ImageMatcher {
 
         // 计算整个模板区域的图像统计信息
         let total_image_sum = Self::sum_region(image_integral, x, y, template_width, template_height) as f32;
-        let _total_image_sum_squared = Self::sum_region(squared_image_integral, x, y, template_width, template_height) as f32;
         let template_size = (template_width * template_height) as f32;
         let image_mean = total_image_sum / template_size;
 
