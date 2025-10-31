@@ -1,14 +1,28 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Image Matching in Rust
+//!
+//! 提供基于 FFT 的归一化互相关（NCC）模板匹配实现。
+//! 核心算法来源于 J.P. Lewis 的论文：
+//! "Fast Normalized Cross-Correlation" (http://scribblethink.org/Work/nvisionInterface/vi95_lewis.pdf)
+//!
+//! ## 使用方法
+//! 
+//! ```rust
+//! use image_matching_rs::{ImageMatcher, MatcherMode};
+//! 
+//! let mut matcher = ImageMatcher::new();
+//! matcher.prepare_template(&template, width, height, MatcherMode::FFT)?;
+//! let results = matcher.matching(image, MatcherMode::FFT, 0.8)?;
+//! ```
+//! 
+//! ## 模块概览
+//! - `matcher`：统一的图像匹配器接口，支持FFT和分段匹配模式
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod matcher;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// 导出统一的图像匹配接口
+pub use matcher::{
+    ImageMatcher,
+    MatcherMode,
+    MatcherResult,
+};
+
