@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 加载模板图
         let template_path = format!("images/template{}x{}.png", template_size, template_size);
         let template_image = match open(&template_path) {
-            Ok(img) => img.to_luma8(),
+            Ok(img) => img,
             Err(e) => {
                 println!("警告: 无法加载模板 {}: {}", template_path, e);
                 continue;
@@ -53,93 +53,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             
-            let screen_luma = screen_image.to_luma8();
             println!("屏幕图像尺寸: {}x{}", screen_image.width(), screen_image.height());
-            
-            // 创建匹配器
-            let mut matcher = ImageMatcher::new();
             
             // FFT模式测试
             println!("FFT模式测试:");
             
-            // 准备FFT模板
+            // 创建FFT匹配器
             let start = Instant::now();
-            match matcher.prepare_template(
-                &template_image,
-                screen_image.width(),
-                screen_image.height(),
-                MatcherMode::FFT
-            ) {
-                Ok(_) => {
-                    let prepare_time = start.elapsed();
-                    println!("  模板准备时间: {:.2}ms", prepare_time.as_millis());
+            let fft_matcher = ImageMatcher::from_image(
+                template_image.clone(),
+                MatcherMode::FFT { 
+                    width: screen_image.width(), 
+                    height: screen_image.height() 
+                },
+                None
+            );
+            let prepare_time = start.elapsed();
+            println!("  匹配器创建时间: {:.2}ms", prepare_time.as_millis());
+            
+            // 执行FFT匹配
+            let start = Instant::now();
+            match fft_matcher.matching(screen_image.clone(), threshold) {
+                Ok(matches) => {
+                    let match_time = start.elapsed();
+                    total_fft_time += match_time.as_millis();
+                    total_fft_matches += matches.len();
                     
-                    // 执行FFT匹配
-                    let start = Instant::now();
-                    match matcher.matching(screen_image.clone(), MatcherMode::FFT, threshold) {
-                        Ok(matches) => {
-                            let match_time = start.elapsed();
-                            total_fft_time += match_time.as_millis();
-                            total_fft_matches += matches.len();
-                            
-                            println!("  匹配时间: {:.2}ms", match_time.as_millis());
-                            println!("  找到匹配: {} 个", matches.len());
-                            
-                            if !matches.is_empty() {
-                                println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
-                                    matches[0].x, matches[0].y, matches[0].correlation);
-                            }
-                        }
-                        Err(e) => {
-                            println!("  FFT匹配失败: {}", e);
-                        }
+                    println!("  匹配时间: {:.2}ms", match_time.as_millis());
+                    println!("  找到匹配: {} 个", matches.len());
+                    
+                    if !matches.is_empty() {
+                        println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                            matches[0].x, matches[0].y, matches[0].correlation);
                     }
                 }
                 Err(e) => {
-                    println!("  FFT模板准备失败: {}", e);
+                    println!("  FFT匹配失败: {}", e);
                 }
             }
             
             // 分段模式测试
             println!("分段模式测试:");
             
-            // 准备分段模板
+            // 创建分段匹配器
             let start = Instant::now();
-            match matcher.prepare_template(
-                &template_image,
-                screen_image.width(),
-                screen_image.height(),
-                MatcherMode::Segmented
-            ) {
-                Ok(_) => {
-                    let prepare_time = start.elapsed();
-                    println!("  模板准备时间: {:.2}ms", prepare_time.as_millis());
+            let segmented_matcher = ImageMatcher::from_image(
+                template_image.clone(),
+                MatcherMode::Segmented,
+                None
+            );
+            let prepare_time = start.elapsed();
+            println!("  匹配器创建时间: {:.2}ms", prepare_time.as_millis());
+            
+            // 执行分段匹配
+            let start = Instant::now();
+            match segmented_matcher.matching(screen_image.clone(), threshold) {
+                Ok(matches) => {
+                    let match_time = start.elapsed();
+                    total_segmented_time += match_time.as_millis();
+                    total_segmented_matches += matches.len();
                     
-                    // 执行分段匹配
-                    let start = Instant::now();
-                    match matcher.match_by_segmented(&screen_luma, threshold) {
-                        Ok(matches) => {
-                            let match_time = start.elapsed();
-                            total_segmented_time += match_time.as_millis();
-                            total_segmented_matches += matches.len();
-                            
-                            println!("  匹配时间: {:.2}ms", match_time.as_millis());
-                            println!("  找到匹配: {} 个", matches.len());
-                            
-                            if !matches.is_empty() {
-                                println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
-                                    matches[0].x, matches[0].y, matches[0].correlation);
-                            }
-                            
-                            successful_combinations += 1;
-                        }
-                        Err(e) => {
-                            println!("  分段匹配失败: {}", e);
-                        }
+                    println!("  匹配时间: {:.2}ms", match_time.as_millis());
+                    println!("  找到匹配: {} 个", matches.len());
+                    
+                    if !matches.is_empty() {
+                        println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                            matches[0].x, matches[0].y, matches[0].correlation);
                     }
+                    
+                    successful_combinations += 1;
                 }
                 Err(e) => {
-                    println!("  分段模板准备失败: {}", e);
+                    println!("  分段匹配失败: {}", e);
                 }
             }
         }

@@ -7,31 +7,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 加载指定的图像和模板
     println!("加载图像...");
     let screen_image = open("images/screen1024x768.png")?;
-    let template_image = open("images/template50x50.png")?.to_luma8();
+    let template_image = open("images/template50x50.png")?;
     
     println!("屏幕图像尺寸: {}x{}", screen_image.width(), screen_image.height());
     println!("模板图像尺寸: {}x{}", template_image.width(), template_image.height());
     
-    // 创建匹配器
-    let mut matcher = ImageMatcher::new();
+    // 创建FFT模式匹配器
+    println!("创建FFT模式匹配器...");
+    let fft_matcher = ImageMatcher::from_image(
+        template_image.clone(),
+        MatcherMode::FFT { 
+            width: screen_image.width(), 
+            height: screen_image.height() 
+        },
+        None
+    );
     
-    // 准备模板（使用FFT模式）
-    println!("准备模板 (FFT模式)...");
-    matcher.prepare_template(
-        &template_image,
-        screen_image.width(),
-        screen_image.height(),
-        MatcherMode::FFT
-    )?;
-    
-    // 执行匹配
-    println!("执行匹配...");
+    // 执行FFT匹配
+    println!("执行FFT匹配...");
     let start_time = std::time::Instant::now();
-    let matches = matcher.matching(screen_image, MatcherMode::FFT, 0.98)?;
+    let matches = fft_matcher.matching(screen_image.clone(), 0.98)?;
     let elapsed = start_time.elapsed();
     
     // 显示结果
-    println!("匹配完成，耗时: {:.2}ms", elapsed.as_millis());
+    println!("FFT匹配完成，耗时: {:.2}ms", elapsed.as_millis());
     println!("找到 {} 个匹配:", matches.len());
     
     for (i, result) in matches.iter().enumerate().take(10) {
@@ -45,29 +44,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // 显示最佳匹配
     if let Some(best_match) = matches.first() {
-        println!("最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
+        println!("FFT最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
                  best_match.x, best_match.y, best_match.correlation);
     }
     
     // 演示分段模式
     println!("\n=== 分段模式匹配 ===");
     
-    // 重新加载图像用于分段模式测试
-    let screen_image_for_segmented = open("images/screen1024x768.png")?;
-    
-    // 准备分段模式模板
-    println!("准备模板 (分段模式)...");
-    matcher.prepare_template(
-        &template_image,
-        screen_image_for_segmented.width(),
-        screen_image_for_segmented.height(),
-        MatcherMode::Segmented
-    )?;
+    // 创建分段模式匹配器
+    println!("创建分段模式匹配器...");
+    let segmented_matcher = ImageMatcher::from_image(
+        template_image,
+        MatcherMode::Segmented,
+        None
+    );
     
     // 执行分段匹配
     println!("执行分段匹配...");
     let start_time = std::time::Instant::now();
-    let segmented_matches = matcher.match_by_segmented(&screen_image_for_segmented.to_luma8(), 0.98)?;
+    let segmented_matches = segmented_matcher.matching(screen_image, 0.98)?;
     let elapsed = start_time.elapsed();
     
     println!("分段匹配完成，耗时: {:.2}ms", elapsed.as_millis());
