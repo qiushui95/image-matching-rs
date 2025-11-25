@@ -23,7 +23,7 @@
 
 ```toml
 [dependencies]
-image-matching-rs = "0.1.0"
+image-matching-rs = "0.1.1"
 ```
 
 ### 基本使用
