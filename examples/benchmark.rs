@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // 创建FFT匹配器
             let start = Instant::now();
-            let fft_matcher = ImageMatcher::from_image(
+            let fft_matcher = ImageMatcher::new_from_image(
                 template_image.clone(),
                 MatcherMode::FFT { 
                     width: screen_image.width(), 
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // 创建分段匹配器
             let start = Instant::now();
-            let segmented_matcher = ImageMatcher::from_image(
+            let segmented_matcher = ImageMatcher::new_from_image(
                 template_image.clone(),
                 MatcherMode::Segmented,
                 None

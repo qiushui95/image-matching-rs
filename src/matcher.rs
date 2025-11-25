@@ -172,13 +172,13 @@ impl ImageMatcher {
     /// use image_matching_rs::{ImageMatcher, MatcherMode};
     /// 
     /// let template = open("template.png").unwrap();
-    /// let matcher = ImageMatcher::from_image(
+    /// let matcher = ImageMatcher::new_from_image(
     ///     template,
     ///     MatcherMode::FFT { width: 1920, height: 1080 },
     ///     None
     /// );
     /// ```
-    pub fn from_image(img: DynamicImage, mode: MatcherMode, resize_width: Option<u32>) -> Self {
+    pub fn new_from_image(img: DynamicImage, mode: MatcherMode, resize_width: Option<u32>) -> Self {
         let img = Self::resize_image_if_needed(img, resize_width);
         let template_image = img.to_luma8();
 
