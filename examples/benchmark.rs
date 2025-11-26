@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // 执行FFT匹配
             let start = Instant::now();
-            match fft_matcher.matching(screen_image.clone(), threshold) {
+            match fft_matcher.matching(screen_image.clone(), threshold, None) {
                 Ok(matches) => {
                     let match_time = start.elapsed();
                     total_fft_time += match_time.as_millis();
@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // 执行分段匹配
             let start = Instant::now();
-            match segmented_matcher.matching(screen_image.clone(), threshold) {
+            match segmented_matcher.matching(screen_image.clone(), threshold, None) {
                 Ok(matches) => {
                     let match_time = start.elapsed();
                     total_segmented_time += match_time.as_millis();

@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 执行FFT匹配
     println!("执行FFT匹配...");
     let start_time = std::time::Instant::now();
-    let matches = fft_matcher.matching(screen_image.clone(), 0.98)?;
+    let matches = fft_matcher.matching(screen_image.clone(), 0.98, None)?;
     let elapsed = start_time.elapsed();
     
     // 显示结果
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 执行分段匹配
     println!("执行分段匹配...");
     let start_time = std::time::Instant::now();
-    let segmented_matches = segmented_matcher.matching(screen_image, 0.98)?;
+    let segmented_matches = segmented_matcher.matching(screen_image, 0.98, None)?;
     let elapsed = start_time.elapsed();
     
     println!("分段匹配完成，耗时: {:.2}ms", elapsed.as_millis());
