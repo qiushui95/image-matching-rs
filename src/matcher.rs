@@ -13,7 +13,7 @@
 use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, imageops::FilterType};
 use rayon::prelude::*;
 use rustfft::{FftPlanner, num_complex::Complex};
-use std::cmp::max;
+use std::cmp::{Ordering, max};
 use std::error::Error;
 
 /// 匹配器模式枚举
@@ -42,21 +42,73 @@ pub enum MatcherMode {
     Segmented,
 }
 
-/// 图像匹配结果
-///
-/// 包含匹配位置、尺寸和相关系数信息
 #[derive(Debug, Clone)]
 pub struct MatcherResult {
-    /// 匹配区域左上角X坐标
-    pub x: u32,
-    /// 匹配区域左上角Y坐标
-    pub y: u32,
     /// 匹配区域宽度
     pub width: u32,
     /// 匹配区域高度
     pub height: u32,
+    /// 最佳匹配结果
+    pub best_result: MatcherSingleResult,
+    /// 所有匹配结果
+    pub all_result: Vec<MatcherSingleResult>,
+}
+
+impl MatcherResult {
+    fn new(
+        template_data: &TemplateData,
+        all_result: Vec<MatcherSingleResult>,
+    ) -> Result<Self, Box<dyn Error>> {
+        if all_result.is_empty() {
+            return Err("No matching results found".into());
+        }
+
+        let mut all_result = all_result;
+
+        let best_result = all_result.remove(0);
+
+        let result = Self {
+            width: template_data.get_template_width(),
+            height: template_data.get_template_height(),
+            best_result,
+            all_result,
+        };
+
+        Ok(result)
+    }
+}
+
+/// 单个图像匹配结果
+///
+/// 包含匹配位置、尺寸和相关系数信息
+#[derive(Debug, Clone)]
+pub struct MatcherSingleResult {
+    /// 匹配区域左上角X坐标
+    pub x: u32,
+    /// 匹配区域左上角Y坐标
+    pub y: u32,
     /// 归一化互相关系数 (0.0-1.0，越接近1.0匹配度越高)
-    pub correlation: f32,
+    pub correlation: f64,
+}
+
+impl PartialEq for MatcherSingleResult {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl Eq for MatcherSingleResult {}
+
+impl PartialOrd for MatcherSingleResult {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.correlation.total_cmp(&other.correlation))
+    }
+}
+
+impl Ord for MatcherSingleResult {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.correlation.total_cmp(&other.correlation)
+    }
 }
 
 pub struct MatcherResultFilter {
@@ -71,7 +123,7 @@ impl MatcherResultFilter {
     pub fn default() -> Self {
         Self::new(5, 5)
     }
-    fn need_filter(&self, item: &MatcherResult, exist: &MatcherResult) -> bool {
+    fn need_filter(&self, item: &MatcherSingleResult, exist: &MatcherSingleResult) -> bool {
         if item.x < exist.x - self.x_delta {
             return false;
         }
@@ -103,15 +155,31 @@ enum TemplateData {
     Segmented { data: SegmentedTemplateData },
 }
 
+impl TemplateData {
+    fn get_template_width(&self) -> u32 {
+        match self {
+            TemplateData::FFT { data } => data.template_width,
+            TemplateData::Segmented { data } => data.template_width,
+        }
+    }
+
+    fn get_template_height(&self) -> u32 {
+        match self {
+            TemplateData::FFT { data } => data.template_height,
+            TemplateData::Segmented { data } => data.template_height,
+        }
+    }
+}
+
 /// FFT模式模板数据结构
 ///
 /// 存储FFT匹配所需的预处理数据
 #[derive(Debug, Clone)]
 struct FFTTemplateData {
     /// 模板在频域的共轭复数数组
-    template_conj_freq: Vec<Complex<f32>>,
+    template_conj_freq: Vec<Complex<f64>>,
     /// 模板的平方偏差和（用于归一化）
-    template_sum_squared_deviations: f32,
+    template_sum_squared_deviations: f64,
     /// 模板宽度
     template_width: u32,
     /// 模板高度
@@ -127,26 +195,26 @@ struct FFTTemplateData {
 struct SegmentedTemplateData {
     /// 快速分段数据 - 格式: (x, y, width, height, mean_value)
     /// 用于初步筛选，分段数量较少，计算速度快
-    template_segments_fast: Vec<(u32, u32, u32, u32, f32)>,
+    template_segments_fast: Vec<(u32, u32, u32, u32, f64)>,
     /// 精细分段数据 - 格式: (x, y, width, height, mean_value)
     /// 用于精确匹配，分段数量较多，计算精度高
-    template_segments_slow: Vec<(u32, u32, u32, u32, f32)>,
+    template_segments_slow: Vec<(u32, u32, u32, u32, f64)>,
     /// 模板宽度
     template_width: u32,
     /// 模板高度
     template_height: u32,
     /// 快速分段的平方差之和
-    segment_sum_squared_deviations_fast: f32,
+    segment_sum_squared_deviations_fast: f64,
     /// 精细分段的平方差之和
-    segment_sum_squared_deviations_slow: f32,
+    segment_sum_squared_deviations_slow: f64,
     /// 快速分段的期望相关性
-    expected_corr_fast: f32,
+    expected_corr_fast: f64,
     /// 精细分段的期望相关性
-    expected_corr_slow: f32,
+    expected_corr_slow: f64,
     /// 快速分段的均值
-    segments_mean_fast: f32,
+    segments_mean_fast: f64,
     /// 精细分段的均值
-    segments_mean_slow: f32,
+    segments_mean_slow: f64,
 }
 
 /// 分段类型枚举
@@ -158,14 +226,14 @@ enum SegmentType {
 
 /// 调整后的阈值结构
 struct AdjustedThresholds {
-    fast_threshold: f32,
-    slow_threshold: f32,
+    fast_threshold: f64,
+    slow_threshold: f64,
 }
 
 /// 图像统计信息结构
 struct ImageStatistics {
-    mean: f32,
-    avg_deviation: f32,
+    mean: f64,
+    avg_deviation: f64,
 }
 
 /// 积分图像结构
@@ -251,7 +319,7 @@ impl ImageMatcher {
             return img;
         }
 
-        let resize_height = (height as f32 * resize_width as f32 / width as f32) as u32;
+        let resize_height = (height as f64 * resize_width as f64 / width as f64) as u32;
         img.resize(resize_width, resize_height, FilterType::Lanczos3)
     }
 
@@ -392,9 +460,9 @@ impl ImageMatcher {
     pub fn matching(
         &self,
         img: DynamicImage,
-        threshold: f32,
+        threshold: f64,
         filter: Option<MatcherResultFilter>,
-    ) -> Result<Vec<MatcherResult>, Box<dyn Error>> {
+    ) -> Result<MatcherResult, Box<dyn Error>> {
         let image = img.to_luma8();
 
         // 验证FFT模式下的图像尺寸
@@ -416,17 +484,12 @@ impl ImageMatcher {
             TemplateData::Segmented { data } => {
                 Self::perform_segmented_matching(data, image, threshold)
             }
-        };
+        }?;
 
-        //对list进行排序
-        list.sort_by(|a, b| {
-            b.correlation
-                .partial_cmp(&a.correlation)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        list.sort_by(|a, b| a.cmp(b).reverse());
 
         let Some(filter) = filter else {
-            return Ok(list);
+            return MatcherResult::new(&self.template_data, list);
         };
 
         let mut results = vec![];
@@ -448,7 +511,7 @@ impl ImageMatcher {
             results.push(item);
         }
 
-        Ok(results)
+        MatcherResult::new(&self.template_data, results)
     }
 
     /// 执行FFT模式匹配
@@ -465,15 +528,17 @@ impl ImageMatcher {
     fn perform_fft_matching(
         template_data: &FFTTemplateData,
         image: ImageBuffer<Luma<u8>, Vec<u8>>,
-        threshold: f32,
-    ) -> Vec<MatcherResult> {
+        threshold: f64,
+    ) -> Result<Vec<MatcherSingleResult>, Box<dyn Error>> {
         let (image_width, image_height) = image.dimensions();
 
-        // 检查图像尺寸是否足够
-        if image_width < template_data.template_width
-            || image_height < template_data.template_height
-        {
-            return Vec::new();
+        // 检查图像尺寸
+        if template_data.template_width > image_width {
+            return Err("模板宽度大于图像宽度".into());
+        }
+
+        if template_data.template_height > image_height {
+            return Err("模板高度大于图像高度".into());
         }
 
         // 计算积分图像用于快速区域统计
@@ -515,15 +580,19 @@ impl ImageMatcher {
     fn perform_segmented_matching(
         template_data: &SegmentedTemplateData,
         image: ImageBuffer<Luma<u8>, Vec<u8>>,
-        threshold: f32,
-    ) -> Vec<MatcherResult> {
+        threshold: f64,
+    ) -> Result<Vec<MatcherSingleResult>, Box<dyn Error>> {
         let (template_width, template_height) =
             (template_data.template_width, template_data.template_height);
         let (image_width, image_height) = image.dimensions();
 
         // 检查图像尺寸
-        if template_width > image_width || template_height > image_height {
-            return Vec::new();
+        if template_width > image_width {
+            return Err("模板宽度大于图像宽度".into());
+        }
+
+        if template_height > image_height {
+            return Err("模板高度大于图像高度".into());
         }
 
         // 计算积分图像
@@ -573,10 +642,10 @@ impl ImageMatcher {
     ///
     /// # 返回值
     /// 包含均值的统计信息
-    fn calculate_image_mean(image_vec: &[Vec<u8>]) -> f32 {
+    fn calculate_image_mean(image_vec: &[Vec<u8>]) -> f64 {
         let height = image_vec.len();
         let width = image_vec[0].len();
-        let total_pixels = (height * width) as f32;
+        let total_pixels = (height * width) as f64;
 
         let sum: u64 = image_vec
             .iter()
@@ -584,7 +653,7 @@ impl ImageMatcher {
             .map(|&val| val as u64)
             .sum();
 
-        sum as f32 / total_pixels
+        sum as f64 / total_pixels
     }
 
     /// 计算模板统计信息（包括平均偏差）
@@ -596,19 +665,19 @@ impl ImageMatcher {
     /// 包含均值和平均偏差的统计信息
     fn calculate_template_statistics(template: &ImageBuffer<Luma<u8>, Vec<u8>>) -> ImageStatistics {
         let (width, height) = template.dimensions();
-        let total_pixels = (width * height) as f32;
+        let total_pixels = (width * height) as f64;
 
         // 计算均值
         let sum: u64 = (0..height)
             .flat_map(|y| (0..width).map(move |x| template.get_pixel(x, y)[0] as u64))
             .sum();
-        let mean = sum as f32 / total_pixels;
+        let mean = sum as f64 / total_pixels;
 
         // 计算平均偏差
-        let sum_deviations: f32 = (0..height)
+        let sum_deviations: f64 = (0..height)
             .flat_map(|y| {
                 (0..width).map(move |x| {
-                    let pixel_value = template.get_pixel(x, y)[0] as f32;
+                    let pixel_value = template.get_pixel(x, y)[0] as f64;
                     (pixel_value - mean).abs()
                 })
             })
@@ -629,10 +698,10 @@ impl ImageMatcher {
     ///
     /// # 返回值
     /// 零均值模板数据
-    fn create_zero_mean_template(template_vec: &[Vec<u8>], mean: f32) -> Vec<Vec<f32>> {
+    fn create_zero_mean_template(template_vec: &[Vec<u8>], mean: f64) -> Vec<Vec<f64>> {
         template_vec
             .iter()
-            .map(|row| row.iter().map(|&pixel| pixel as f32 - mean).collect())
+            .map(|row| row.iter().map(|&pixel| pixel as f64 - mean).collect())
             .collect()
     }
 
@@ -643,7 +712,7 @@ impl ImageMatcher {
     ///
     /// # 返回值
     /// 平方偏差和
-    fn calculate_sum_squared_deviations(zero_mean_template: &[Vec<f32>]) -> f32 {
+    fn calculate_sum_squared_deviations(zero_mean_template: &[Vec<f64>]) -> f64 {
         zero_mean_template
             .iter()
             .flat_map(|row| row.iter())
@@ -662,11 +731,11 @@ impl ImageMatcher {
     /// # 返回值
     /// 频域共轭复数数组
     fn create_fft_template_conjugate(
-        zero_mean_template: &[Vec<f32>],
+        zero_mean_template: &[Vec<f64>],
         template_width: u32,
         template_height: u32,
         padded_size: u32,
-    ) -> Vec<Complex<f32>> {
+    ) -> Vec<Complex<f64>> {
         // 创建填充的模板复数向量
         let mut template_padded =
             vec![Complex::new(0.0, 0.0); (padded_size * padded_size) as usize];
@@ -680,7 +749,7 @@ impl ImageMatcher {
         }
 
         // 执行FFT变换
-        let mut planner = FftPlanner::<f32>::new();
+        let mut planner = FftPlanner::<f64>::new();
         let fft = planner.plan_fft_forward((padded_size * padded_size) as usize);
         fft.process(&mut template_padded);
 
@@ -695,20 +764,20 @@ impl ImageMatcher {
     ///
     /// # 返回值
     /// 零均值图像数据
-    fn create_zero_mean_image(image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Vec<Vec<f32>> {
+    fn create_zero_mean_image(image: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Vec<Vec<f64>> {
         let (width, height) = image.dimensions();
 
         // 计算图像均值
         let sum: u64 = (0..height)
             .flat_map(|y| (0..width).map(move |x| image.get_pixel(x, y)[0] as u64))
             .sum();
-        let mean = sum as f32 / (width * height) as f32;
+        let mean = sum as f64 / (width * height) as f64;
 
         // 创建零均值图像
         (0..height)
             .map(|y| {
                 (0..width)
-                    .map(|x| image.get_pixel(x, y)[0] as f32 - mean)
+                    .map(|x| image.get_pixel(x, y)[0] as f64 - mean)
                     .collect()
             })
             .collect()
@@ -725,11 +794,11 @@ impl ImageMatcher {
     /// # 返回值
     /// FFT卷积结果
     fn perform_fft_convolution(
-        zero_mean_image: &[Vec<f32>],
+        zero_mean_image: &[Vec<f64>],
         image_width: u32,
         image_height: u32,
         template_data: &FFTTemplateData,
-    ) -> Vec<Complex<f32>> {
+    ) -> Vec<Complex<f64>> {
         // 填充图像到指定尺寸
         let mut image_padded = vec![
             Complex::new(0.0, 0.0);
@@ -745,13 +814,13 @@ impl ImageMatcher {
         }
 
         // FFT变换图像到频域
-        let mut planner = FftPlanner::<f32>::new();
+        let mut planner = FftPlanner::<f64>::new();
         let fft = planner
             .plan_fft_forward((template_data.padded_size * template_data.padded_size) as usize);
         fft.process(&mut image_padded);
 
         // 频域相乘（互相关）
-        let product_freq: Vec<Complex<f32>> = image_padded
+        let product_freq: Vec<Complex<f64>> = image_padded
             .iter()
             .zip(template_data.template_conj_freq.iter())
             .map(|(&img_val, &tmpl_val)| img_val * tmpl_val)
@@ -838,18 +907,18 @@ impl ImageMatcher {
     fn calculate_fft_correlations(
         integral_images: &IntegralImages,
         template_data: &FFTTemplateData,
-        fft_result: &[Complex<f32>],
+        fft_result: &[Complex<f64>],
         image_width: u32,
         image_height: u32,
-        threshold: f32,
-    ) -> Vec<MatcherResult> {
+        threshold: f64,
+    ) -> Result<Vec<MatcherSingleResult>, Box<dyn Error>> {
         // 生成所有坐标对，用于并行处理
         let coords: Vec<(u32, u32)> = (0..=(image_height - template_data.template_height))
             .flat_map(|y| (0..=(image_width - template_data.template_width)).map(move |x| (x, y)))
             .collect();
 
         // 并行计算所有可能位置的相关系数
-        let found_points: Vec<(u32, u32, f32)> = coords
+        let list: Vec<MatcherSingleResult> = coords
             .par_iter()
             .map(|&(x, y)| {
                 let correlation = Self::calculate_single_fft_correlation(
@@ -860,17 +929,13 @@ impl ImageMatcher {
                     y,
                     fft_result,
                 );
-                (x, y, correlation as f32)
+                (x, y, correlation)
             })
-            .filter(|&(_, _, corr)| corr >= threshold)
+            .filter(|&(_, _, correlation)| correlation >= threshold)
+            .map(|(x, y, correlation)| MatcherSingleResult { x, y, correlation })
             .collect();
 
-        // 按相关系数降序排序并转换为结果格式
-        Self::convert_points_to_results(
-            found_points,
-            template_data.template_width,
-            template_data.template_height,
-        )
+        Ok(list)
     }
 
     /// 计算单个位置的FFT相关系数
@@ -891,11 +956,10 @@ impl ImageMatcher {
         template_data: &FFTTemplateData,
         x: u32,
         y: u32,
-        fft_result: &[Complex<f32>],
+        fft_result: &[Complex<f64>],
     ) -> f64 {
         // 计算分子（从FFT结果获取，需要归一化）
         let numerator = fft_result[y as usize * template_data.padded_size as usize + x as usize].re
-            as f64
             / (template_data.padded_size * template_data.padded_size) as f64;
 
         // 计算分母
@@ -919,7 +983,7 @@ impl ImageMatcher {
         let image_mean_squared = (sum_image_region * sum_image_region) / template_size;
         let image_sum_squared_deviations = sum_squared_image_region - image_mean_squared;
 
-        let denominator = (template_data.template_sum_squared_deviations as f64
+        let denominator = (template_data.template_sum_squared_deviations
             * image_sum_squared_deviations)
             .sqrt();
 
@@ -946,7 +1010,7 @@ impl ImageMatcher {
     /// 调整后的阈值结构
     fn calculate_adjusted_thresholds(
         template_data: &SegmentedTemplateData,
-        threshold: f32,
+        threshold: f64,
     ) -> AdjustedThresholds {
         AdjustedThresholds {
             fast_threshold: threshold * template_data.expected_corr_fast - 0.0001,
@@ -975,17 +1039,17 @@ impl ImageMatcher {
         image_height: u32,
         template_width: u32,
         template_height: u32,
-    ) -> Vec<MatcherResult> {
+    ) -> Result<Vec<MatcherSingleResult>, Box<dyn Error>> {
         // 生成所有可能的坐标
         let coords: Vec<(u32, u32)> = (0..=(image_height - template_height))
             .flat_map(|y| (0..=(image_width - template_width)).map(move |x| (x, y)))
             .collect();
 
         // 使用并行计算进行匹配
-        let found_points: Vec<(u32, u32, f32)> = coords
+        let list: Vec<MatcherSingleResult> = coords
             .par_iter()
             .map(|&(x, y)| {
-                let corr = Self::calculate_single_segmented_correlation(
+                let correlation = Self::calculate_single_segmented_correlation(
                     &integral_images.integral,
                     &integral_images.squared_integral,
                     template_data,
@@ -993,13 +1057,13 @@ impl ImageMatcher {
                     y,
                     thresholds.fast_threshold,
                 );
-                (x, y, corr)
+                (x, y, correlation)
             })
-            .filter(|&(_, _, corr)| corr >= thresholds.slow_threshold)
+            .filter(|&(_, _, correlation)| correlation >= thresholds.slow_threshold)
+            .map(|(x, y, correlation)| MatcherSingleResult { x, y, correlation })
             .collect();
 
-        // 转换为结果格式
-        Self::convert_points_to_results(found_points, template_width, template_height)
+        Ok(list)
     }
 
     /// 计算单个位置的分段相关系数
@@ -1022,8 +1086,8 @@ impl ImageMatcher {
         template_data: &SegmentedTemplateData,
         x: u32,
         y: u32,
-        fast_threshold: f32,
-    ) -> f32 {
+        fast_threshold: f64,
+    ) -> f64 {
         // 第一阶段：快速分段匹配
         let fast_corr = Self::calculate_segment_correlation(
             image_integral,
@@ -1074,28 +1138,28 @@ impl ImageMatcher {
     fn calculate_segment_correlation(
         image_integral: &[Vec<u64>],
         squared_image_integral: &[Vec<u64>],
-        segments: &[(u32, u32, u32, u32, f32)],
+        segments: &[(u32, u32, u32, u32, f64)],
         template_width: u32,
         template_height: u32,
-        segment_sum_squared_deviations: f32,
-        segments_mean: f32,
+        segment_sum_squared_deviations: f64,
+        segments_mean: f64,
         x: u32,
         y: u32,
-    ) -> f32 {
-        let mut numerator = 0.0f32;
-        let mut image_sum_squared_deviations = 0.0f32;
+    ) -> f64 {
+        let mut numerator = 0.0f64;
+        let mut image_sum_squared_deviations = 0.0f64;
 
         // 计算整个模板区域的图像统计信息
         let total_image_sum =
-            Self::sum_region(image_integral, x, y, template_width, template_height) as f32;
-        let template_size = (template_width * template_height) as f32;
+            Self::sum_region(image_integral, x, y, template_width, template_height) as f64;
+        let template_size = (template_width * template_height) as f64;
         let image_mean = total_image_sum / template_size;
 
         // 遍历所有分段计算相关性
         for &(seg_x, seg_y, seg_width, seg_height, segment_mean) in segments {
             let region_sum =
                 Self::sum_region(image_integral, x + seg_x, y + seg_y, seg_width, seg_height)
-                    as f32;
+                    as f64;
 
             let region_sum_squared = Self::sum_region(
                 squared_image_integral,
@@ -1103,9 +1167,9 @@ impl ImageMatcher {
                 y + seg_y,
                 seg_width,
                 seg_height,
-            ) as f32;
+            ) as f64;
 
-            let region_size = (seg_width * seg_height) as f32;
+            let region_size = (seg_width * seg_height) as f64;
             let region_mean = region_sum / region_size;
 
             // 计算分子项
@@ -1126,33 +1190,6 @@ impl ImageMatcher {
         }
     }
 
-    /// 转换结果格式
-    ///
-    /// # 参数
-    /// * `found_points` - 找到的匹配点
-    /// * `template_width` - 模板宽度
-    /// * `template_height` - 模板高度
-    ///
-    /// # 返回值
-    /// 转换后的匹配结果列表
-    fn convert_points_to_results<T: Into<f32> + Copy>(
-        found_points: Vec<(u32, u32, T)>,
-        template_width: u32,
-        template_height: u32,
-    ) -> Vec<MatcherResult> {
-        // 转换为MatcherResult格式
-        found_points
-            .into_iter()
-            .map(|(x, y, correlation)| MatcherResult {
-                x,
-                y,
-                width: template_width,
-                height: template_height,
-                correlation: correlation.into(),
-            })
-            .collect()
-    }
-
     /// 创建模板分段
     ///
     /// 使用递归分治算法将模板图像分割为多个分段
@@ -1167,12 +1204,12 @@ impl ImageMatcher {
     /// (分段列表, 平方偏差和, 期望相关性, 分段均值)
     fn create_template_segments(
         template: &ImageBuffer<Luma<u8>, Vec<u8>>,
-        mean_template_value: f32,
-        avg_deviation_of_template: f32,
+        mean_template_value: f64,
+        avg_deviation_of_template: f64,
         segment_type: SegmentType,
-    ) -> (Vec<(u32, u32, u32, u32, f32)>, f32, f32, f32) {
+    ) -> (Vec<(u32, u32, u32, u32, f64)>, f64, f64, f64) {
         let (template_width, template_height) = template.dimensions();
-        let mut picture_segments: Vec<(u32, u32, u32, u32, f32)> = Vec::new();
+        let mut picture_segments: Vec<(u32, u32, u32, u32, f64)> = Vec::new();
 
         // 根据分段类型设置不同的参数
         let (max_segments, min_std_dev_multiplier) = match segment_type {
@@ -1201,8 +1238,8 @@ impl ImageMatcher {
 
             // 计算分段均值
             if !picture_segments.is_empty() {
-                let sum_means: f32 = picture_segments.iter().map(|(_, _, _, _, mean)| mean).sum();
-                segments_mean = sum_means / picture_segments.len() as f32;
+                let sum_means: f64 = picture_segments.iter().map(|(_, _, _, _, mean)| mean).sum();
+                segments_mean = sum_means / picture_segments.len() as f64;
             }
 
             // 如果分段过多，增加标准差阈值
@@ -1257,8 +1294,8 @@ impl ImageMatcher {
         y: u32,
         width: u32,
         height: u32,
-        min_std_dev: f32,
-        segments: &mut Vec<(u32, u32, u32, u32, f32)>,
+        min_std_dev: f64,
+        segments: &mut Vec<(u32, u32, u32, u32, f64)>,
     ) {
         // 计算当前区域的统计信息
         let (mean, std_dev) = Self::calculate_region_statistics(template, x, y, width, height);
@@ -1332,10 +1369,10 @@ impl ImageMatcher {
         y: u32,
         width: u32,
         height: u32,
-    ) -> (f32, f32) {
+    ) -> (f64, f64) {
         let mut sum = 0u64;
         let mut sum_squared = 0u64;
-        let pixel_count = (width * height) as f32;
+        let pixel_count = (width * height) as f64;
 
         for dy in 0..height {
             for dx in 0..width {
@@ -1345,8 +1382,8 @@ impl ImageMatcher {
             }
         }
 
-        let mean = sum as f32 / pixel_count;
-        let variance = (sum_squared as f32 / pixel_count) - (mean * mean);
+        let mean = sum as f64 / pixel_count;
+        let variance = (sum_squared as f64 / pixel_count) - (mean * mean);
         let std_dev = variance.sqrt();
 
         (mean, std_dev)
@@ -1360,8 +1397,8 @@ impl ImageMatcher {
     /// # 返回值
     /// 合并后的分段列表
     fn merge_similar_segments(
-        mut segments: Vec<(u32, u32, u32, u32, f32)>,
-    ) -> Vec<(u32, u32, u32, u32, f32)> {
+        mut segments: Vec<(u32, u32, u32, u32, f64)>,
+    ) -> Vec<(u32, u32, u32, u32, f64)> {
         let mut changed = true;
 
         while changed {
@@ -1397,8 +1434,8 @@ impl ImageMatcher {
     /// # 返回值
     /// 是否应该合并
     fn should_merge_segments(
-        seg1: &(u32, u32, u32, u32, f32),
-        seg2: &(u32, u32, u32, u32, f32),
+        seg1: &(u32, u32, u32, u32, f64),
+        seg2: &(u32, u32, u32, u32, f64),
     ) -> bool {
         let (x1, y1, w1, h1, mean1) = *seg1;
         let (x2, y2, w2, h2, mean2) = *seg2;
@@ -1424,9 +1461,9 @@ impl ImageMatcher {
     /// # 返回值
     /// 合并后的分段
     fn merge_two_segments(
-        seg1: &(u32, u32, u32, u32, f32),
-        seg2: &(u32, u32, u32, u32, f32),
-    ) -> (u32, u32, u32, u32, f32) {
+        seg1: &(u32, u32, u32, u32, f64),
+        seg2: &(u32, u32, u32, u32, f64),
+    ) -> (u32, u32, u32, u32, f64) {
         let (x1, y1, w1, h1, mean1) = *seg1;
         let (x2, y2, w2, h2, mean2) = *seg2;
 
@@ -1439,8 +1476,8 @@ impl ImageMatcher {
         let new_height = max_y - min_y;
 
         // 按面积加权计算新的均值
-        let area1 = (w1 * h1) as f32;
-        let area2 = (w2 * h2) as f32;
+        let area1 = (w1 * h1) as f64;
+        let area2 = (w2 * h2) as f64;
         let total_area = area1 + area2;
         let new_mean = (mean1 * area1 + mean2 * area2) / total_area;
 
@@ -1456,21 +1493,21 @@ impl ImageMatcher {
     /// # 返回值
     /// (平方偏差和, 期望相关性)
     fn calculate_segment_statistics(
-        segments: &[(u32, u32, u32, u32, f32)],
-        segments_mean: f32,
-    ) -> (f32, f32) {
-        let mut sum_squared_deviations = 0.0f32;
+        segments: &[(u32, u32, u32, u32, f64)],
+        segments_mean: f64,
+    ) -> (f64, f64) {
+        let mut sum_squared_deviations = 0.0f64;
         let mut total_area = 0u32;
 
         for &(_, _, width, height, segment_mean) in segments {
             let area = width * height;
             let deviation = segment_mean - segments_mean;
-            sum_squared_deviations += deviation * deviation * area as f32;
+            sum_squared_deviations += deviation * deviation * area as f64;
             total_area += area;
         }
 
         // 计算期望相关性（基于分段的方差）
-        let variance = sum_squared_deviations / total_area as f32;
+        let variance = sum_squared_deviations / total_area as f64;
         let expected_corr = (variance / (variance + 1.0)).sqrt();
 
         (sum_squared_deviations, expected_corr)

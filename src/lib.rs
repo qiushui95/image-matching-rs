@@ -28,6 +28,6 @@ pub mod matcher;
 pub use matcher::{
     ImageMatcher,
     MatcherMode,
-    MatcherResult,
+    MatcherSingleResult,
 };
 
