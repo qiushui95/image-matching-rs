@@ -1,7 +1,7 @@
-use image::{imageops, ImageBuffer, Rgba, RgbaImage};
+use image::{ImageBuffer, Rgba, RgbaImage, imageops};
 use rand::Rng;
 use serde::Serialize;
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::path::Path;
 
 #[derive(Serialize)]
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut screen = generate_gradient_background(screen_w, screen_h);
         let mut placements: Vec<Placement> = Vec::new();
         let mut rects: Vec<(u32, u32, u32, u32)> = Vec::new(); // (x, y, w, h)
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // 缩放比例：0%, 20%, 40%, 60%, 80%（即保留100%, 80%, 60%, 40%, 20%的尺寸）
         let scale_factors = vec![1.0, 0.8, 0.6, 0.4, 0.2];
@@ -44,9 +44,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (template_size, template) in &templates {
             for &scale in &scale_factors {
                 let scaled_size = (*template_size as f32 * scale) as u32;
-                if scaled_size < 5 { continue; } // 跳过太小的尺寸
-                
-                let scaled = imageops::resize(template, scaled_size, scaled_size, imageops::FilterType::Lanczos3);
+                if scaled_size < 5 {
+                    continue;
+                } // 跳过太小的尺寸
+
+                let scaled = imageops::resize(
+                    template,
+                    scaled_size,
+                    scaled_size,
+                    imageops::FilterType::Lanczos3,
+                );
 
                 // 尝试随机放置，避免重叠且不越界
                 let max_x = screen_w.saturating_sub(scaled_size);
@@ -54,16 +61,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let mut placed = false;
                 for _try in 0..100_000 {
-                    let x = rng.gen_range(0..=max_x);
-                    let y = rng.gen_range(0..=max_y);
+                    let x = rng.random_range(0..=max_x);
+                    let y = rng.random_range(0..=max_y);
 
                     if !intersects_any(x, y, scaled_size, scaled_size, &rects) {
                         // 叠加到屏幕图上
                         imageops::overlay(&mut screen, &scaled, x as i64, y as i64);
-                        placements.push(Placement { 
-                            width: scaled_size, 
-                            x, 
-                            y 
+                        placements.push(Placement {
+                            width: scaled_size,
+                            x,
+                            y,
                         });
                         rects.push((x, y, scaled_size, scaled_size));
                         placed = true;
@@ -129,10 +136,38 @@ fn generate_template_200x200(img: &mut RgbaImage, w: u32, h: u32) {
     // 四个角落色块 - 不同颜色组合
     let corner_size = (w / 10).max(4);
     let corner_margin = (w / 50).max(1);
-    draw_rect(img, corner_margin, corner_margin, corner_size, corner_size, Rgba([255, 100, 100, 255])); // 粉红
-    draw_rect(img, w - corner_margin - corner_size, corner_margin, corner_size, corner_size, Rgba([100, 255, 100, 255])); // 浅绿
-    draw_rect(img, corner_margin, h - corner_margin - corner_size, corner_size, corner_size, Rgba([100, 100, 255, 255])); // 浅蓝
-    draw_rect(img, w - corner_margin - corner_size, h - corner_margin - corner_size, corner_size, corner_size, Rgba([255, 255, 100, 255])); // 浅黄
+    draw_rect(
+        img,
+        corner_margin,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([255, 100, 100, 255]),
+    ); // 粉红
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([100, 255, 100, 255]),
+    ); // 浅绿
+    draw_rect(
+        img,
+        corner_margin,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([100, 100, 255, 255]),
+    ); // 浅蓝
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([255, 255, 100, 255]),
+    ); // 浅黄
 
     // 金色边框
     let border_thickness = (w / 100).max(1);
@@ -146,17 +181,48 @@ fn generate_template_200x200(img: &mut RgbaImage, w: u32, h: u32) {
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
     let base_radius = (w / 6).max(8);
-    
+
     // 同心圆（白-黑-红-白）
-    draw_disk(img, cx, cy, (base_radius * 4 / 5) as i32, Rgba([255, 255, 255, 255]));
-    draw_disk(img, cx, cy, (base_radius * 3 / 5) as i32, Rgba([0, 0, 0, 255]));
-    draw_disk(img, cx, cy, (base_radius * 2 / 5) as i32, Rgba([220, 20, 60, 255]));
-    draw_disk(img, cx, cy, (base_radius / 5) as i32, Rgba([255, 255, 255, 255]));
-    
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 4 / 5) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 3 / 5) as i32,
+        Rgba([0, 0, 0, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 2 / 5) as i32,
+        Rgba([220, 20, 60, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius / 5) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
+
     // 十字准星
     let crosshair_size = (base_radius * 7 / 4) as i32;
     let crosshair_thickness = (w / 40).max(1);
-    draw_crosshair(img, cx, cy, crosshair_size, crosshair_thickness, Rgba([0, 0, 0, 255]));
+    draw_crosshair(
+        img,
+        cx,
+        cy,
+        crosshair_size,
+        crosshair_thickness,
+        Rgba([0, 0, 0, 255]),
+    );
 }
 
 // 100x100 模板：钻石设计
@@ -176,10 +242,38 @@ fn generate_template_100x100(img: &mut RgbaImage, w: u32, h: u32) {
     // 四个角落色块 - 金属色调
     let corner_size = (w / 8).max(4);
     let corner_margin = (w / 25).max(1);
-    draw_rect(img, corner_margin, corner_margin, corner_size, corner_size, Rgba([255, 215, 0, 255])); // 金色
-    draw_rect(img, w - corner_margin - corner_size, corner_margin, corner_size, corner_size, Rgba([192, 192, 192, 255])); // 银色
-    draw_rect(img, corner_margin, h - corner_margin - corner_size, corner_size, corner_size, Rgba([184, 115, 51, 255])); // 铜色
-    draw_rect(img, w - corner_margin - corner_size, h - corner_margin - corner_size, corner_size, corner_size, Rgba([229, 228, 226, 255])); // 铂金色
+    draw_rect(
+        img,
+        corner_margin,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([255, 215, 0, 255]),
+    ); // 金色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([192, 192, 192, 255]),
+    ); // 银色
+    draw_rect(
+        img,
+        corner_margin,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([184, 115, 51, 255]),
+    ); // 铜色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([229, 228, 226, 255]),
+    ); // 铂金色
 
     // 紫色边框
     let border_thickness = (w / 50).max(1);
@@ -193,12 +287,30 @@ fn generate_template_100x100(img: &mut RgbaImage, w: u32, h: u32) {
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
     let diamond_size = (w / 4).max(8);
-    
+
     // 绘制钻石形状（菱形）
     draw_diamond(img, cx, cy, diamond_size as i32, Rgba([255, 255, 255, 255]));
-    draw_diamond(img, cx, cy, (diamond_size * 3 / 4) as i32, Rgba([0, 0, 0, 255]));
-    draw_diamond(img, cx, cy, (diamond_size / 2) as i32, Rgba([255, 20, 147, 255])); // 深粉色
-    draw_diamond(img, cx, cy, (diamond_size / 4) as i32, Rgba([255, 255, 255, 255]));
+    draw_diamond(
+        img,
+        cx,
+        cy,
+        (diamond_size * 3 / 4) as i32,
+        Rgba([0, 0, 0, 255]),
+    );
+    draw_diamond(
+        img,
+        cx,
+        cy,
+        (diamond_size / 2) as i32,
+        Rgba([255, 20, 147, 255]),
+    ); // 深粉色
+    draw_diamond(
+        img,
+        cx,
+        cy,
+        (diamond_size / 4) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
 }
 
 // 150x150 模板：六边形设计
@@ -218,10 +330,38 @@ fn generate_template_150x150(img: &mut RgbaImage, w: u32, h: u32) {
     // 四个角落色块 - 彩虹色调
     let corner_size = (w / 9).max(4);
     let corner_margin = (w / 30).max(1);
-    draw_rect(img, corner_margin, corner_margin, corner_size, corner_size, Rgba([255, 69, 0, 255])); // 橙红色
-    draw_rect(img, w - corner_margin - corner_size, corner_margin, corner_size, corner_size, Rgba([50, 205, 50, 255])); // 酸橙绿
-    draw_rect(img, corner_margin, h - corner_margin - corner_size, corner_size, corner_size, Rgba([138, 43, 226, 255])); // 蓝紫色
-    draw_rect(img, w - corner_margin - corner_size, h - corner_margin - corner_size, corner_size, corner_size, Rgba([255, 20, 147, 255])); // 深粉色
+    draw_rect(
+        img,
+        corner_margin,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([255, 69, 0, 255]),
+    ); // 橙红色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([50, 205, 50, 255]),
+    ); // 酸橙绿
+    draw_rect(
+        img,
+        corner_margin,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([138, 43, 226, 255]),
+    ); // 蓝紫色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([255, 20, 147, 255]),
+    ); // 深粉色
 
     // 青色边框
     let border_thickness = (w / 75).max(1);
@@ -235,12 +375,24 @@ fn generate_template_150x150(img: &mut RgbaImage, w: u32, h: u32) {
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
     let hex_size = (w / 5).max(10);
-    
+
     // 绘制同心六边形
     draw_hexagon(img, cx, cy, hex_size as i32, Rgba([255, 255, 255, 255]));
     draw_hexagon(img, cx, cy, (hex_size * 4 / 5) as i32, Rgba([0, 0, 0, 255]));
-    draw_hexagon(img, cx, cy, (hex_size * 3 / 5) as i32, Rgba([0, 255, 127, 255])); // 春绿色
-    draw_hexagon(img, cx, cy, (hex_size * 2 / 5) as i32, Rgba([255, 255, 255, 255]));
+    draw_hexagon(
+        img,
+        cx,
+        cy,
+        (hex_size * 3 / 5) as i32,
+        Rgba([0, 255, 127, 255]),
+    ); // 春绿色
+    draw_hexagon(
+        img,
+        cx,
+        cy,
+        (hex_size * 2 / 5) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
     draw_hexagon(img, cx, cy, (hex_size / 5) as i32, Rgba([255, 140, 0, 255])); // 深橙色
 }
 
@@ -261,10 +413,38 @@ fn generate_template_50x50(img: &mut RgbaImage, w: u32, h: u32) {
     // 四个角落色块 - 对比色
     let corner_size = (w / 8).max(3);
     let corner_margin = (w / 25).max(1);
-    draw_rect(img, corner_margin, corner_margin, corner_size, corner_size, Rgba([0, 255, 255, 255])); // 青色
-    draw_rect(img, w - corner_margin - corner_size, corner_margin, corner_size, corner_size, Rgba([255, 0, 255, 255])); // 洋红
-    draw_rect(img, corner_margin, h - corner_margin - corner_size, corner_size, corner_size, Rgba([255, 255, 0, 255])); // 黄色
-    draw_rect(img, w - corner_margin - corner_size, h - corner_margin - corner_size, corner_size, corner_size, Rgba([0, 0, 0, 255])); // 黑色
+    draw_rect(
+        img,
+        corner_margin,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([0, 255, 255, 255]),
+    ); // 青色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([255, 0, 255, 255]),
+    ); // 洋红
+    draw_rect(
+        img,
+        corner_margin,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([255, 255, 0, 255]),
+    ); // 黄色
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([0, 0, 0, 255]),
+    ); // 黑色
 
     // 蓝色边框
     let border_thickness = (w / 50).max(1);
@@ -278,11 +458,23 @@ fn generate_template_50x50(img: &mut RgbaImage, w: u32, h: u32) {
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
     let star_size = (w / 4).max(6);
-    
+
     // 绘制星形（使用多个三角形近似）
     draw_star(img, cx, cy, star_size as i32, Rgba([255, 255, 255, 255]));
-    draw_star(img, cx, cy, (star_size * 2 / 3) as i32, Rgba([0, 0, 0, 255]));
-    draw_star(img, cx, cy, (star_size / 3) as i32, Rgba([255, 215, 0, 255])); // 金色中心
+    draw_star(
+        img,
+        cx,
+        cy,
+        (star_size * 2 / 3) as i32,
+        Rgba([0, 0, 0, 255]),
+    );
+    draw_star(
+        img,
+        cx,
+        cy,
+        (star_size / 3) as i32,
+        Rgba([255, 215, 0, 255]),
+    ); // 金色中心
 }
 
 // 默认模板设计
@@ -302,10 +494,38 @@ fn generate_template_default(img: &mut RgbaImage, w: u32, h: u32) {
     // 标准设计
     let corner_size = (w / 10).max(4);
     let corner_margin = (w / 50).max(1);
-    draw_rect(img, corner_margin, corner_margin, corner_size, corner_size, Rgba([255, 0, 0, 255]));
-    draw_rect(img, w - corner_margin - corner_size, corner_margin, corner_size, corner_size, Rgba([0, 255, 0, 255]));
-    draw_rect(img, corner_margin, h - corner_margin - corner_size, corner_size, corner_size, Rgba([0, 0, 255, 255]));
-    draw_rect(img, w - corner_margin - corner_size, h - corner_margin - corner_size, corner_size, corner_size, Rgba([255, 255, 0, 255]));
+    draw_rect(
+        img,
+        corner_margin,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([255, 0, 0, 255]),
+    );
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        corner_margin,
+        corner_size,
+        corner_size,
+        Rgba([0, 255, 0, 255]),
+    );
+    draw_rect(
+        img,
+        corner_margin,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([0, 0, 255, 255]),
+    );
+    draw_rect(
+        img,
+        w - corner_margin - corner_size,
+        h - corner_margin - corner_size,
+        corner_size,
+        corner_size,
+        Rgba([255, 255, 0, 255]),
+    );
 
     let border_thickness = (w / 100).max(1);
     draw_border(img, Rgba([255, 255, 255, 255]), border_thickness);
@@ -316,15 +536,46 @@ fn generate_template_default(img: &mut RgbaImage, w: u32, h: u32) {
     let cx = (w / 2) as i32;
     let cy = (h / 2) as i32;
     let base_radius = (w / 6).max(8);
-    
-    draw_disk(img, cx, cy, (base_radius * 4 / 5) as i32, Rgba([255, 255, 255, 255]));
-    draw_disk(img, cx, cy, (base_radius * 3 / 5) as i32, Rgba([0, 0, 0, 255]));
-    draw_disk(img, cx, cy, (base_radius * 2 / 5) as i32, Rgba([220, 20, 60, 255]));
-    draw_disk(img, cx, cy, (base_radius / 5) as i32, Rgba([255, 255, 255, 255]));
-    
+
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 4 / 5) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 3 / 5) as i32,
+        Rgba([0, 0, 0, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius * 2 / 5) as i32,
+        Rgba([220, 20, 60, 255]),
+    );
+    draw_disk(
+        img,
+        cx,
+        cy,
+        (base_radius / 5) as i32,
+        Rgba([255, 255, 255, 255]),
+    );
+
     let crosshair_size = (base_radius * 7 / 4) as i32;
     let crosshair_thickness = (w / 40).max(1);
-    draw_crosshair(img, cx, cy, crosshair_size, crosshair_thickness, Rgba([0, 0, 0, 255]));
+    draw_crosshair(
+        img,
+        cx,
+        cy,
+        crosshair_size,
+        crosshair_thickness,
+        Rgba([0, 0, 0, 255]),
+    );
 }
 
 fn generate_gradient_background(w: u32, h: u32) -> RgbaImage {
@@ -396,40 +647,57 @@ fn draw_diagonal_x(img: &mut RgbaImage, color: Rgba<u8>, thickness: u32) {
 }
 
 fn draw_disk(img: &mut RgbaImage, cx: i32, cy: i32, r: i32, color: Rgba<u8>) {
-    if r <= 0 { return; }
+    if r <= 0 {
+        return;
+    }
     let w = img.width() as i32;
     let h = img.height() as i32;
     let r2 = r * r;
     for dy in -r..=r {
         let yy = cy + dy;
-        if yy < 0 || yy >= h { continue; }
+        if yy < 0 || yy >= h {
+            continue;
+        }
         for dx in -r..=r {
             let xx = cx + dx;
-            if xx < 0 || xx >= w { continue; }
-            if dx*dx + dy*dy <= r2 {
+            if xx < 0 || xx >= w {
+                continue;
+            }
+            if dx * dx + dy * dy <= r2 {
                 img.put_pixel(xx as u32, yy as u32, color);
             }
         }
     }
 }
 
-fn draw_crosshair(img: &mut RgbaImage, cx: i32, cy: i32, size: i32, thickness: u32, color: Rgba<u8>) {
+fn draw_crosshair(
+    img: &mut RgbaImage,
+    cx: i32,
+    cy: i32,
+    size: i32,
+    thickness: u32,
+    color: Rgba<u8>,
+) {
     let w = img.width() as i32;
     let h = img.height() as i32;
     let half = size / 2;
     let t = thickness as i32;
     // 水平线
-    for dy in -t/2..=t/2 {
+    for dy in -t / 2..=t / 2 {
         let yy = cy + dy;
-        if yy < 0 || yy >= h { continue; }
+        if yy < 0 || yy >= h {
+            continue;
+        }
         for xx in (cx - half).max(0)..=(cx + half).min(w - 1) {
             img.put_pixel(xx as u32, yy as u32, color);
         }
     }
     // 垂直线
-    for dx in -t/2..=t/2 {
+    for dx in -t / 2..=t / 2 {
         let xx = cx + dx;
-        if xx < 0 || xx >= w { continue; }
+        if xx < 0 || xx >= w {
+            continue;
+        }
         for yy in (cy - half).max(0)..=(cy + half).min(h - 1) {
             img.put_pixel(xx as u32, yy as u32, color);
         }
@@ -440,24 +708,28 @@ fn draw_star(img: &mut RgbaImage, cx: i32, cy: i32, size: i32, color: Rgba<u8>) 
     // 绘制五角星，使用简化的方法：绘制多条线段
     let outer_radius = size;
     let inner_radius = size * 2 / 5;
-    
+
     // 五角星的10个顶点（5个外顶点 + 5个内顶点）
     let mut points = Vec::new();
     for i in 0..10 {
         let angle = (i as f32 * std::f32::consts::PI / 5.0) - std::f32::consts::PI / 2.0;
-        let radius = if i % 2 == 0 { outer_radius } else { inner_radius } as f32;
+        let radius = if i % 2 == 0 {
+            outer_radius
+        } else {
+            inner_radius
+        } as f32;
         let x = cx + (radius * angle.cos()) as i32;
         let y = cy + (radius * angle.sin()) as i32;
         points.push((x, y));
     }
-    
+
     // 连接相邻的点形成星形
     for i in 0..10 {
         let (x1, y1) = points[i];
         let (x2, y2) = points[(i + 1) % 10];
         draw_line(img, x1, y1, x2, y2, color);
     }
-    
+
     // 填充中心区域
     draw_disk(img, cx, cy, inner_radius / 2, color);
 }
@@ -466,15 +738,19 @@ fn draw_diamond(img: &mut RgbaImage, cx: i32, cy: i32, size: i32, color: Rgba<u8
     // 绘制钻石形状（菱形）
     let w = img.width() as i32;
     let h = img.height() as i32;
-    
+
     for dy in -size..=size {
         let yy = cy + dy;
-        if yy < 0 || yy >= h { continue; }
-        
+        if yy < 0 || yy >= h {
+            continue;
+        }
+
         let width = size - dy.abs();
         for dx in -width..=width {
             let xx = cx + dx;
-            if xx < 0 || xx >= w { continue; }
+            if xx < 0 || xx >= w {
+                continue;
+            }
             img.put_pixel(xx as u32, yy as u32, color);
         }
     }
@@ -484,19 +760,19 @@ fn draw_hexagon(img: &mut RgbaImage, cx: i32, cy: i32, size: i32, color: Rgba<u8
     // 绘制六边形
     let mut points = Vec::new();
     for i in 0..6 {
-        let angle = (i as f32 * std::f32::consts::PI / 3.0);
+        let angle = i as f32 * std::f32::consts::PI / 3.0;
         let x = cx + (size as f32 * angle.cos()) as i32;
         let y = cy + (size as f32 * angle.sin()) as i32;
         points.push((x, y));
     }
-    
+
     // 连接相邻的点形成六边形
     for i in 0..6 {
         let (x1, y1) = points[i];
         let (x2, y2) = points[(i + 1) % 6];
         draw_line(img, x1, y1, x2, y2, color);
     }
-    
+
     // 简单填充中心区域
     draw_disk(img, cx, cy, size * 2 / 3, color);
 }
@@ -510,16 +786,16 @@ fn draw_line(img: &mut RgbaImage, x1: i32, y1: i32, x2: i32, y2: i32, color: Rgb
     let mut err = dx - dy;
     let mut x = x1;
     let mut y = y1;
-    
+
     loop {
         if x >= 0 && x < img.width() as i32 && y >= 0 && y < img.height() as i32 {
             img.put_pixel(x as u32, y as u32, color);
         }
-        
+
         if x == x2 && y == y2 {
             break;
         }
-        
+
         let e2 = 2 * err;
         if e2 > -dy {
             err -= dy;
