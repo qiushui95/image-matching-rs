@@ -26,27 +26,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 执行FFT匹配
     println!("执行FFT匹配...");
     let start_time = std::time::Instant::now();
-    let matches = fft_matcher.matching(screen_image.clone(), 0.98, None)?;
+    let res = fft_matcher.matching(screen_image.clone(), 0.98, None)?;
     let elapsed = start_time.elapsed();
     
     // 显示结果
     println!("FFT匹配完成，耗时: {:.2}ms", elapsed.as_millis());
-    println!("找到 {} 个匹配:", matches.len());
+    println!("找到 {} 个匹配:", res.all_result.len());
     
-    for (i, result) in matches.iter().enumerate().take(10) {
+    for (i, result) in res.all_result.iter().enumerate().take(10) {
         println!("  {}. 位置({}, {}), 尺寸: {}x{}, 相关系数: {:.3}", 
-                 i + 1, result.x, result.y, result.width, result.height, result.correlation);
+                 i + 1, result.x, result.y, res.width, res.height, result.correlation);
     }
     
-    if matches.len() > 10 {
-        println!("  ... 还有 {} 个匹配", matches.len() - 10);
+    if res.all_result.len() > 10 {
+        println!("  ... 还有 {} 个匹配", res.all_result.len() - 10);
     }
     
     // 显示最佳匹配
-    if let Some(best_match) = matches.first() {
-        println!("FFT最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
-                 best_match.x, best_match.y, best_match.correlation);
-    }
+    println!("FFT最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
+             res.best_result.x, res.best_result.y, res.best_result.correlation);
     
     // 演示分段模式
     println!("\n=== 分段模式匹配 ===");
@@ -62,26 +60,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 执行分段匹配
     println!("执行分段匹配...");
     let start_time = std::time::Instant::now();
-    let segmented_matches = segmented_matcher.matching(screen_image, 0.98, None)?;
+    let seg_res = segmented_matcher.matching(screen_image, 0.98, None)?;
     let elapsed = start_time.elapsed();
     
     println!("分段匹配完成，耗时: {:.2}ms", elapsed.as_millis());
-    println!("找到 {} 个匹配:", segmented_matches.len());
+    println!("找到 {} 个匹配:", seg_res.all_result.len());
     
-    for (i, result) in segmented_matches.iter().enumerate().take(5) {
+    for (i, result) in seg_res.all_result.iter().enumerate().take(5) {
         println!("  {}. 位置({}, {}), 相关系数: {:.3}", 
                  i + 1, result.x, result.y, result.correlation);
     }
     
-    if segmented_matches.len() > 5 {
-        println!("  ... 还有 {} 个匹配", segmented_matches.len() - 5);
+    if seg_res.all_result.len() > 5 {
+        println!("  ... 还有 {} 个匹配", seg_res.all_result.len() - 5);
     }
     
     // 显示最佳匹配
-    if let Some(best_match) = segmented_matches.first() {
-        println!("分段模式最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
-                 best_match.x, best_match.y, best_match.correlation);
-    }
+    println!("分段模式最佳匹配: 位置({}, {}), 相关系数: {:.3}", 
+             seg_res.best_result.x, seg_res.best_result.y, seg_res.best_result.correlation);
     
     Ok(())
 }

@@ -74,18 +74,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 执行FFT匹配
             let start = Instant::now();
             match fft_matcher.matching(screen_image.clone(), threshold, None) {
-                Ok(matches) => {
+                Ok(res) => {
                     let match_time = start.elapsed();
                     total_fft_time += match_time.as_millis();
-                    total_fft_matches += matches.len();
+                    total_fft_matches += res.all_result.len();
                     
                     println!("  匹配时间: {:.2}ms", match_time.as_millis());
-                    println!("  找到匹配: {} 个", matches.len());
+                    println!("  找到匹配: {} 个", res.all_result.len());
                     
-                    if !matches.is_empty() {
-                        println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
-                            matches[0].x, matches[0].y, matches[0].correlation);
-                    }
+                    println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                        res.best_result.x, res.best_result.y, res.best_result.correlation);
                 }
                 Err(e) => {
                     println!("  FFT匹配失败: {}", e);
@@ -108,18 +106,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 执行分段匹配
             let start = Instant::now();
             match segmented_matcher.matching(screen_image.clone(), threshold, None) {
-                Ok(matches) => {
+                Ok(res) => {
                     let match_time = start.elapsed();
                     total_segmented_time += match_time.as_millis();
-                    total_segmented_matches += matches.len();
+                    total_segmented_matches += res.all_result.len();
                     
                     println!("  匹配时间: {:.2}ms", match_time.as_millis());
-                    println!("  找到匹配: {} 个", matches.len());
+                    println!("  找到匹配: {} 个", res.all_result.len());
                     
-                    if !matches.is_empty() {
-                        println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
-                            matches[0].x, matches[0].y, matches[0].correlation);
-                    }
+                    println!("  最佳匹配: 位置({}, {}), 相关系数: {:.4}", 
+                        res.best_result.x, res.best_result.y, res.best_result.correlation);
                     
                     successful_combinations += 1;
                 }

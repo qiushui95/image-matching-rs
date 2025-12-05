@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut screen = generate_gradient_background(screen_w, screen_h);
         let mut placements: Vec<Placement> = Vec::new();
         let mut rects: Vec<(u32, u32, u32, u32)> = Vec::new(); // (x, y, w, h)
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // 缩放比例：0%, 20%, 40%, 60%, 80%（即保留100%, 80%, 60%, 40%, 20%的尺寸）
         let scale_factors = vec![1.0, 0.8, 0.6, 0.4, 0.2];
@@ -54,8 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let mut placed = false;
                 for _try in 0..100_000 {
-                    let x = rng.gen_range(0..=max_x);
-                    let y = rng.gen_range(0..=max_y);
+                    let x = rng.random_range(0..=max_x);
+                    let y = rng.random_range(0..=max_y);
 
                     if !intersects_any(x, y, scaled_size, scaled_size, &rects) {
                         // 叠加到屏幕图上
@@ -484,7 +484,7 @@ fn draw_hexagon(img: &mut RgbaImage, cx: i32, cy: i32, size: i32, color: Rgba<u8
     // 绘制六边形
     let mut points = Vec::new();
     for i in 0..6 {
-        let angle = (i as f32 * std::f32::consts::PI / 3.0);
+        let angle = i as f32 * std::f32::consts::PI / 3.0;
         let x = cx + (size as f32 * angle.cos()) as i32;
         let y = cy + (size as f32 * angle.sin()) as i32;
         points.push((x, y));

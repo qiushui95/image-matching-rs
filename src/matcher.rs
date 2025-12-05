@@ -111,18 +111,35 @@ impl Ord for MatcherSingleResult {
     }
 }
 
+/// 匹配结果过滤器
+///
+/// 按坐标邻域对候选结果进行去重，以避免相近位置的重复结果。
 pub struct MatcherResultFilter {
     x_delta: u32,
     y_delta: u32,
 }
 impl MatcherResultFilter {
+    /// 创建过滤器
+    ///
+    /// # 参数
+    /// * `x_delta` - X 方向允许的近邻范围
+    /// * `y_delta` - Y 方向允许的近邻范围
+    ///
+    /// # 返回值
+    /// 过滤器实例
     pub fn new(x_delta: u32, y_delta: u32) -> Self {
         Self { x_delta, y_delta }
     }
 
+    /// 创建默认过滤器
+    ///
+    /// 默认近邻范围：`x_delta=5`, `y_delta=5`
     pub fn default() -> Self {
         Self::new(5, 5)
     }
+    /// 判断候选是否需要根据近邻规则被过滤
+    ///
+    /// 当候选与已存在结果在 `x_delta/y_delta` 所定义的邻域内时，返回 `true`。
     fn need_filter(&self, item: &MatcherSingleResult, exist: &MatcherSingleResult) -> bool {
         if item.x < exist.x - self.x_delta {
             return false;
@@ -442,19 +459,21 @@ impl ImageMatcher {
     /// # 参数
     /// * `img` - 待匹配的目标图像
     /// * `threshold` - 匹配阈值 (0.0-1.0)
+    /// * `filter` - 可选的结果去重过滤器（按坐标邻域去重）
     ///
     /// # 返回值
-    /// 匹配结果列表，按相关系数降序排列
+    /// `MatcherResult`，包含最佳结果与全部结果（已按相关系数降序）
     ///
     /// # 错误
     /// 当图像尺寸不匹配或其他处理错误时返回错误
     ///
     /// # 示例
     /// ```
-    /// let results = matcher.matching(target_image, 0.8)?;
-    /// for result in results {
-    ///     println!("找到匹配: ({}, {}), 相关系数: {:.3}",
-    ///              result.x, result.y, result.correlation);
+    /// let result = matcher.matching(target_image, 0.8, None)?;
+    /// println!("最佳匹配: ({}, {}), 相关系数: {:.3}",
+    ///          result.best_result.x, result.best_result.y, result.best_result.correlation);
+    /// for r in &result.all_result {
+    ///     println!("候选: ({}, {}), corr={:.3}", r.x, r.y, r.correlation);
     /// }
     /// ```
     pub fn matching(
@@ -1012,9 +1031,11 @@ impl ImageMatcher {
         template_data: &SegmentedTemplateData,
         threshold: f64,
     ) -> AdjustedThresholds {
+        // 分段相关性通常低于像素级互相关，适当降低阈值上限以提高召回
+        let base = threshold.min(0.95);
         AdjustedThresholds {
-            fast_threshold: threshold * template_data.expected_corr_fast - 0.0001,
-            slow_threshold: threshold * template_data.expected_corr_slow - 0.0001,
+            fast_threshold: base * template_data.expected_corr_fast - 0.0001,
+            slow_threshold: base * template_data.expected_corr_slow - 0.0001,
         }
     }
 
@@ -1147,7 +1168,6 @@ impl ImageMatcher {
         y: u32,
     ) -> f64 {
         let mut numerator = 0.0f64;
-        let mut image_sum_squared_deviations = 0.0f64;
 
         // 计算整个模板区域的图像统计信息
         let total_image_sum =
@@ -1155,38 +1175,36 @@ impl ImageMatcher {
         let template_size = (template_width * template_height) as f64;
         let image_mean = total_image_sum / template_size;
 
-        // 遍历所有分段计算相关性
+        // 计算图像分段均值的方差（基于全局均值），用于与模板分段均值匹配的归一化
+        let mut image_segment_sum_squared_deviations = 0.0f64;
+
+        // 遍历所有分段计算相关性分子
         for &(seg_x, seg_y, seg_width, seg_height, segment_mean) in segments {
             let region_sum =
                 Self::sum_region(image_integral, x + seg_x, y + seg_y, seg_width, seg_height)
                     as f64;
 
-            let region_sum_squared = Self::sum_region(
-                squared_image_integral,
-                x + seg_x,
-                y + seg_y,
-                seg_width,
-                seg_height,
-            ) as f64;
-
             let region_size = (seg_width * seg_height) as f64;
             let region_mean = region_sum / region_size;
 
-            // 计算分子项
+            // 计算分子项（模板分段均值 与 图像分段均值 的协方差加权）
             numerator += (segment_mean - segments_mean) * (region_mean - image_mean) * region_size;
 
-            // 计算分母项
-            let region_mean_squared = (region_sum * region_sum) / region_size;
-            image_sum_squared_deviations += region_sum_squared - region_mean_squared;
+            // 图像分段均值的平方偏差和（与分母中的模板分段平方偏差和同尺度）
+            image_segment_sum_squared_deviations +=
+                (region_mean - image_mean) * (region_mean - image_mean) * region_size;
         }
 
         // 计算最终相关系数
-        let denominator = (segment_sum_squared_deviations * image_sum_squared_deviations).sqrt();
+        let denominator =
+            (segment_sum_squared_deviations * image_segment_sum_squared_deviations).sqrt();
 
         if denominator == 0.0 {
             0.0
         } else {
-            numerator / denominator
+            let corr = numerator / denominator;
+            // 数值安全处理：限制相关系数在 [-1.0, 1.0] 范围内
+            corr.clamp(-1.0, 1.0)
         }
     }
 
