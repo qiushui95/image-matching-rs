@@ -1,8 +1,8 @@
 use super::generate_search_coordinates;
 use crate::error::ImageError;
 use crate::result::MatchHit;
-use crate::template::TemplateData;
 use crate::template::integral::IntegralImages;
+use crate::template::TemplateData;
 use image::{GrayImage, ImageBuffer, Luma};
 use num_complex::Complex;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -200,7 +200,13 @@ impl FFTTemplateData {
                 (x, y, correlation)
             })
             .filter(|&(_, _, correlation)| correlation >= threshold)
-            .map(|(x, y, correlation)| MatchHit { x, y, correlation })
+            .map(|(x, y, correlation)| MatchHit {
+                x,
+                y,
+                width: self.template_width,
+                height: self.template_height,
+                correlation,
+            })
             .collect();
 
         Ok(list)

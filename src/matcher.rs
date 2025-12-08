@@ -102,11 +102,11 @@ impl ImageMatcher {
         list.par_sort_unstable_by(|a, b| b.cmp(a));
 
         let Some(filter) = filter else {
-            return MatchResults::new(&self.template_data, list);
+            return MatchResults::new(list);
         };
 
         let results = filter.filter_results(list);
 
-        MatchResults::new(&self.template_data, results)
+        MatchResults::new(results)
     }
 }

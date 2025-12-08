@@ -404,7 +404,13 @@ impl SegmentedTemplateData {
                 (x, y, correlation)
             })
             .filter(|&(_, _, correlation)| correlation >= thresholds.slow_threshold)
-            .map(|(x, y, correlation)| MatchHit { x, y, correlation })
+            .map(|(x, y, correlation)| MatchHit {
+                x,
+                y,
+                width: self.template_width,
+                height: self.template_height,
+                correlation,
+            })
             .collect();
 
         Ok(list)
